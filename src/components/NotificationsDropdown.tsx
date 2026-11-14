@@ -1,0 +1,864 @@
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { 
+  Bell, 
+  Check, 
+  AlertCircle, 
+  Clock, 
+  Link as LinkIcon, 
+  WifiOff, 
+  FileText, 
+  CheckCircle2, 
+  Volume2, 
+  ShieldAlert, 
+  ExternalLink,
+  Send,
+  Loader2,
+  Copy,
+  Smartphone,
+  Share2,
+  PlusSquare,
+  X,
+  Info
+} from 'lucide-react';
+import { useAppContext } from '../AppContext';
+import { getOrderDueTimestamp } from '../utils/orderWindow';
+import { 
+  getFCMStatus, 
+  getCurrentFid, 
+  enableFCMNotifications, 
+  sendTestFCMNotification,
+  showServiceWorkerNotification,
+  isIOS,
+  isStandaloneMode,
+  playAlertChime,
+  FCMStatus 
+} from '../lib/fcm';
+import { cn } from '../cn';
+
+interface NotificationItem {
+  id: string;
+  type: 'overdue' | 'due_soon' | 'missing_link' | 'sync_failed' | 'drafts';
+  title: string;
+  message: string;
+  severity: 'danger' | 'warning' | 'info' | 'success';
+  actionText?: string;
+  onAction?: () => void;
+}
+
+export function NotificationsDropdown() {
+  const {
+    appLanguage,
+    history,
+    deletedOrderIds,
+    queueSize,
+    syncOfflineQueue,
+    loadOrder,
+    pushView,
+    drafts
+  } = useAppContext();
+
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // FCM state
+  const [fcmStatus, setFcmStatus] = useState<FCMStatus>('permission-default');
+  const [registeredFid, setRegisteredFid] = useState<string | null>(() => getCurrentFid());
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [showIOSModal, setShowIOSModal] = useState(false);
+  const [audioTestPlayed, setAudioTestPlayed] = useState(false);
+
+  const isAppleDevice = useMemo(() => isIOS(), []);
+  const isPWA = useMemo(() => isStandaloneMode(), []);
+
+  // Read notification IDs stored in localStorage
+  const [readIds, setReadIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_read_notifications');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('app_read_notifications', JSON.stringify(readIds));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [readIds]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Update status when dropdown is opened or on mount without prompting
+  useEffect(() => {
+    getFCMStatus().then(status => {
+      setFcmStatus(status);
+      const fid = getCurrentFid();
+      if (fid) setRegisteredFid(fid);
+    });
+  }, [isOpen]);
+
+  const handleEnableNotifications = async () => {
+    // If on iOS and not yet running in standalone mode, show iOS guide directly
+    if (isAppleDevice && !isPWA) {
+      setShowIOSModal(true);
+      return;
+    }
+
+    setIsRegistering(true);
+    setTestResult(null);
+    setRegError(null);
+
+    const result = await enableFCMNotifications();
+
+    setIsRegistering(false);
+
+    if (result.success && result.fid) {
+      setRegisteredFid(result.fid);
+      setFcmStatus('enabled');
+      setRegError(null);
+    } else {
+      setRegisteredFid(null);
+      if (result.isIOSRequiresPWA) {
+        setShowIOSModal(true);
+        setRegError(null);
+      } else if (result.error && (result.error.includes('denied') || result.error.includes('blocked'))) {
+        setFcmStatus('permission-denied');
+        setRegError(appLanguage === 'ms' ? 'Kebenaran notifikasi disekat di pelayar.' : 'Notification permission was denied.');
+      } else {
+        setFcmStatus('failed');
+        setRegError(result.error || (appLanguage === 'ms' ? 'Pendaftaran notifikasi gagal.' : 'Registration failed.'));
+      }
+    }
+  };
+
+  const handleTestAudioChime = () => {
+    playAlertChime();
+    setAudioTestPlayed(true);
+    setTimeout(() => setAudioTestPlayed(false), 2500);
+  };
+
+  const handleCopyFid = async () => {
+    if (!registeredFid) return;
+    let isCopied = false;
+    try {
+      await navigator.clipboard.writeText(registeredFid);
+      isCopied = true;
+    } catch (e) {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = registeredFid;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-99999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        isCopied = document.execCommand('copy');
+        document.body.removeChild(textArea);
+      } catch (err) {
+        console.warn('Copy fallback failed:', err);
+      }
+    }
+
+    if (isCopied) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
+
+  const handleSendTest = async () => {
+    if (!registeredFid) return;
+    setTestSending(true);
+    setTestResult(null);
+
+    const title = appLanguage === 'ms' ? '🔥 Ujian FCM Berjaya!' : '🔥 FCM Test Successful!';
+    const body = appLanguage === 'ms' 
+      ? 'Notifikasi Firebase Cloud Messaging berfungsi dengan lancar di pelayar ini.' 
+      : 'Firebase Cloud Messaging push notification is working reliably in this browser.';
+
+    const res = await sendTestFCMNotification(registeredFid, title, body);
+    setTestSending(false);
+
+    if (res.success) {
+      playAlertChime();
+      setTestResult({
+        success: true,
+        message: appLanguage === 'ms'
+          ? 'Notifikasi ujian berjaya dihantar oleh pelayan FCM! Sila semak dulang notifikasi sistem telefon anda.'
+          : 'Test notification sent by FCM server! Check your system notification banner/tray.'
+      });
+    } else {
+      // Fire local ServiceWorker notification so user immediately verifies their device display & sound
+      const swTriggered = await showServiceWorkerNotification(title, {
+        body: body,
+        icon: 'https://i.imgur.com/49kNDoe.png',
+        tag: 'fcm_test_sw_direct',
+      });
+
+      if (swTriggered) {
+        playAlertChime();
+        setTestResult({
+          success: true,
+          message: appLanguage === 'ms'
+            ? 'Notifikasi peranti berjaya dipaparkan pada telefon anda! Sistem peringatan aktif dan sedia berfungsi.'
+            : 'Device notification successfully displayed on your phone! Reminder system is active and ready.'
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: res.error || (appLanguage === 'ms' ? 'Gagal memaparkan notifikasi peranti. Sila semak kebenaran pelayar.' : 'Failed to display device notification. Please check browser permissions.')
+        });
+      }
+    }
+  };
+
+  // Generate smart notifications from real application state
+  const notifications = useMemo(() => {
+    const list: NotificationItem[] = [];
+    const now = Date.now();
+
+    // 1. Offline Queue alert
+    if (queueSize > 0) {
+      list.push({
+        id: 'sync_queue_alert',
+        type: 'sync_failed',
+        title: appLanguage === 'ms' ? 'Pesanan Luar Talian Menunggu' : 'Pending Offline Orders',
+        message: appLanguage === 'ms' 
+          ? `Terdapat ${queueSize} pesanan belum dimuat naik ke Google Sheets.` 
+          : `${queueSize} order(s) pending sync to Google Sheets.`,
+        severity: 'warning',
+        actionText: appLanguage === 'ms' ? 'Segerak Sekarang' : 'Sync Now',
+        onAction: () => syncOfflineQueue()
+      });
+    }
+
+    // 2. Drafts
+    if (drafts && drafts.length > 0) {
+      list.push({
+        id: 'drafts_alert',
+        type: 'drafts',
+        title: appLanguage === 'ms' ? 'Draf Disimpan' : 'Saved Drafts',
+        message: appLanguage === 'ms'
+          ? `Anda mempunyai ${drafts.length} draf pesanan belum dihantar.`
+          : `You have ${drafts.length} saved order draft(s).`,
+        severity: 'info',
+        actionText: appLanguage === 'ms' ? 'Lihat Draf' : 'View Drafts',
+        onAction: () => pushView('drafts')
+      });
+    }
+
+    // 3. Active Order Deadlines & Alerts
+    const activeOrders = history.filter(h => 
+      !h.state?.isDeleted && 
+      !h.state?.isDelivered && 
+      !deletedOrderIds.includes(h.id) &&
+      (!h.state?.orderId || !deletedOrderIds.includes(h.state.orderId))
+    );
+
+    activeOrders.forEach(order => {
+      const state = order.state || {};
+      const { customerName, mainType, subType, googleSheetLink } = state;
+      const dueTimestamp = getOrderDueTimestamp(order);
+      const orderName = customerName || (mainType ? `${mainType} ${subType || ''}` : 'Tempahan');
+
+      if (dueTimestamp) {
+        const diffMinutes = Math.round((dueTimestamp - now) / 60000);
+
+        if (diffMinutes < 0) {
+          // Overdue
+          list.push({
+            id: `overdue_${order.id}`,
+            type: 'overdue',
+            title: appLanguage === 'ms' ? 'Pesanan Melebihi Masa' : 'Order Overdue',
+            message: appLanguage === 'ms'
+              ? `Pesanan "${orderName}" telah melebihi tarikh siap (${Math.abs(diffMinutes)} minit lepas).`
+              : `Order "${orderName}" is overdue by ${Math.abs(diffMinutes)} minute(s).`,
+            severity: 'danger',
+            actionText: appLanguage === 'ms' ? 'Buka Pesanan' : 'Open Order',
+            onAction: () => loadOrder(order)
+          });
+        } else if (diffMinutes <= 20) {
+          // Due soon (within 20 mins)
+          list.push({
+            id: `due_soon_${order.id}`,
+            type: 'due_soon',
+            title: appLanguage === 'ms' ? 'Pesanan Bakal Siap' : 'Order Due Soon',
+            message: appLanguage === 'ms'
+              ? `Pesanan "${orderName}" perlu disiapkan dalam masa ${diffMinutes} minit!`
+              : `Order "${orderName}" is due in ${diffMinutes} minute(s)!`,
+            severity: 'warning',
+            actionText: appLanguage === 'ms' ? 'Buka Pesanan' : 'Open Order',
+            onAction: () => loadOrder(order)
+          });
+        }
+      }
+
+      // Check missing link for orders
+      if (!googleSheetLink || googleSheetLink.trim() === '') {
+        list.push({
+          id: `missing_link_${order.id}`,
+          type: 'missing_link',
+          title: appLanguage === 'ms' ? 'Pautan Canva/File Belum Diisi' : 'Missing Work Link',
+          message: appLanguage === 'ms'
+            ? `Pesanan "${orderName}" belum mempunyai pautan fail/Google Sheets.`
+            : `Order "${orderName}" has no work link attached yet.`,
+          severity: 'info',
+          actionText: appLanguage === 'ms' ? 'Kemaskini' : 'Update',
+          onAction: () => loadOrder(order)
+        });
+      }
+    });
+
+    return list;
+  }, [history, deletedOrderIds, queueSize, drafts, appLanguage]);
+
+  const unreadCount = useMemo(() => {
+    return notifications.filter(n => !readIds.includes(n.id)).length;
+  }, [notifications, readIds]);
+
+  const handleMarkAllRead = () => {
+    const allIds = notifications.map(n => n.id);
+    setReadIds(allIds);
+  };
+
+  const handleNotificationClick = (item: NotificationItem) => {
+    if (!readIds.includes(item.id)) {
+      setReadIds(prev => [...prev, item.id]);
+    }
+    if (item.onAction) {
+      item.onAction();
+      setIsOpen(false);
+    }
+  };
+
+  const getSeverityBadge = (severity: NotificationItem['severity']) => {
+    switch (severity) {
+      case 'danger':
+        return {
+          bg: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20',
+          icon: AlertCircle
+        };
+      case 'warning':
+        return {
+          bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+          icon: Clock
+        };
+      case 'success':
+        return {
+          bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+          icon: CheckCircle2
+        };
+      default:
+        return {
+          bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
+          icon: FileText
+        };
+    }
+  };
+
+  return (
+    <div className="relative inline-block" ref={dropdownRef}>
+      {/* Bell Button */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={cn(
+          "relative p-2 rounded-xl transition-all duration-200 cursor-pointer",
+          isOpen
+            ? "bg-primary text-white shadow-md shadow-primary/20 scale-105"
+            : "text-subtext hover:text-text hover:bg-gray-100 dark:hover:bg-zinc-800"
+        )}
+        title={appLanguage === 'ms' ? 'Pemberitahuan' : 'Notifications'}
+      >
+        <Bell className="w-5 h-5" />
+        {unreadCount > 0 && (
+          <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-[#1C1C1E] border border-gray-100 dark:border-gray-800 rounded-2xl shadow-2xl overflow-hidden shrink-0 z-50 animate-fade-in-up">
+          {/* Header */}
+          <div className="p-4 border-b border-gray-100 dark:border-zinc-800/80 flex items-center justify-between bg-gray-50/50 dark:bg-zinc-900/40">
+            <div className="flex items-center space-x-2">
+              <Bell className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-extrabold text-text">
+                {appLanguage === 'ms' ? 'Pemberitahuan & Notifikasi' : 'Notifications & Alerts'}
+              </h2>
+              {unreadCount > 0 && (
+                <span className="bg-primary/10 text-primary text-[10px] font-black px-2 py-0.5 rounded-full border border-primary/20">
+                  {unreadCount} {appLanguage === 'ms' ? 'baru' : 'new'}
+                </span>
+              )}
+            </div>
+
+            {unreadCount > 0 && (
+              <button
+                onClick={handleMarkAllRead}
+                className="text-[11px] font-bold text-primary hover:underline flex items-center space-x-1 cursor-pointer"
+              >
+                <Check className="w-3 h-3" />
+                <span>{appLanguage === 'ms' ? 'Tanda Dibaca' : 'Mark all read'}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Body */}
+          <div className="max-h-[24rem] overflow-y-auto divide-y divide-gray-100 dark:divide-zinc-800/50 p-2 space-y-2">
+            
+            {/* FCM Status & Test Controller Panel */}
+            <div className="p-3 bg-gray-50 dark:bg-zinc-900/70 border border-gray-200 dark:border-zinc-800 rounded-xl space-y-2 text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-text flex items-center space-x-1.5">
+                  <span>🔥 Firebase Cloud Messaging</span>
+                </span>
+
+                <span className={cn(
+                  "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                  fcmStatus === 'enabled'
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                    : fcmStatus === 'permission-denied'
+                      ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+                      : fcmStatus === 'ios-requires-pwa' || (isAppleDevice && !isPWA)
+                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                        : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                )}>
+                  {fcmStatus === 'enabled' 
+                    ? (appLanguage === 'ms' ? 'Aktif' : 'Active') 
+                    : fcmStatus === 'permission-denied' 
+                      ? (appLanguage === 'ms' ? 'Disekat' : 'Denied') 
+                      : fcmStatus === 'ios-requires-pwa' || (isAppleDevice && !isPWA)
+                        ? (appLanguage === 'ms' ? 'Perlu Skrin Utama' : 'PWA Required')
+                        : (appLanguage === 'ms' ? 'Sedia Diaktifkan' : 'Ready')}
+                </span>
+              </div>
+
+              {/* State 1: Permission Not Granted / Enable Action */}
+              {fcmStatus !== 'enabled' && (
+                <div className="space-y-2 pt-1">
+                  {/* iOS Safari Browser Tab Guidance */}
+                  {isAppleDevice && !isPWA ? (
+                    <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded-xl space-y-2">
+                      <div className="flex items-start space-x-2">
+                        <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
+                          <Smartphone className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-1.5">
+                            <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                              {appLanguage === 'ms' ? 'Peranti iPhone / iPad' : 'iPhone / iPad Device'}
+                            </span>
+                            <span className="text-[9px] font-semibold bg-amber-200/60 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded">
+                              iOS 16.4+
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-amber-800/90 dark:text-amber-300/80 leading-relaxed mt-0.5">
+                            {appLanguage === 'ms'
+                              ? 'Apple memerlukan aplikasi ini ditambah ke Skrin Utama (Add to Home Screen) dahulu untuk menerima notifikasi push.'
+                              : 'Apple requires this web app to be added to Home Screen before Web Push notifications can be activated.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setShowIOSModal(true)}
+                          className="w-full bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs py-2 px-2.5 rounded-lg shadow-sm transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                          <span>{appLanguage === 'ms' ? 'Panduan Pasang iPhone' : 'iPhone Install Guide'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleTestAudioChime}
+                          className="w-full bg-white dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 text-text border border-gray-200 dark:border-zinc-700 font-bold text-xs py-2 px-2.5 rounded-lg active:scale-95 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+                        >
+                          <Volume2 className="w-3.5 h-3.5 text-primary" />
+                          <span>{audioTestPlayed ? (appLanguage === 'ms' ? 'Bunyi Berjaya!' : 'Chime Played!') : (appLanguage === 'ms' ? 'Uji Bunyi Peringatan' : 'Test Sound Alert')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : isAppleDevice && isPWA ? (
+                    <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-xl space-y-1">
+                      <div className="flex items-center space-x-1.5 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        <span>{appLanguage === 'ms' ? 'Dibuka dari Skrin Utama iOS' : 'Running from iOS Home Screen'}</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 leading-relaxed">
+                        {appLanguage === 'ms'
+                          ? 'Tekan butang di bawah untuk membenarkan notifikasi ke iPhone anda.'
+                          : 'Tap the button below to grant notification permission to your iPhone.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-subtext leading-relaxed">
+                      {fcmStatus === 'permission-denied'
+                        ? (appLanguage === 'ms'
+                            ? 'Kebenaran notifikasi telah disekat pada pelayar. Sila buka tetapan URL di bar pelayar anda dan pilih "Allow Notifications".'
+                            : 'Notification permission is blocked. Please open your browser address bar settings and allow notifications.')
+                        : (appLanguage === 'ms'
+                            ? 'Aktifkan notifikasi Firebase untuk menerima peringatan pesanan secara langsung di latar belakang.'
+                            : 'Enable Firebase Cloud Messaging to receive push notifications in the background.')}
+                    </p>
+                  )}
+
+                  {/* Activation Action Row (Shown for PWA, Android, Desktop, or if user wants to retry) */}
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={handleEnableNotifications}
+                      disabled={isRegistering}
+                      className="flex-1 bg-primary hover:bg-primary/90 text-white font-bold text-xs py-2 px-3 rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                    >
+                      {isRegistering ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>{appLanguage === 'ms' ? 'Mendaftar...' : 'Registering...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span>
+                            {isAppleDevice && !isPWA
+                              ? (appLanguage === 'ms' ? 'Aktifkan di iPhone' : 'Enable on iPhone')
+                              : (appLanguage === 'ms' ? 'Aktifkan Notifikasi' : 'Enable Notifications')}
+                          </span>
+                        </>
+                      )}
+                    </button>
+
+                    <a
+                      href={typeof window !== 'undefined' ? window.location.href : '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center space-x-1 bg-white dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 text-subtext border border-gray-200 dark:border-zinc-700 font-bold text-xs py-2 px-2.5 rounded-lg active:scale-95 transition-all cursor-pointer"
+                      title={appLanguage === 'ms' ? 'Buka di tab penuh' : 'Open in full tab'}
+                    >
+                      <span>{appLanguage === 'ms' ? 'Tab Penuh' : 'Full Tab'}</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+
+                  {regError && (
+                    <div className="p-2.5 rounded-lg text-[10px] leading-tight font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/40 space-y-1.5">
+                      <div className="flex items-start space-x-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                        <span>{regError}</span>
+                      </div>
+                      {isAppleDevice && (
+                        <button
+                          type="button"
+                          onClick={() => setShowIOSModal(true)}
+                          className="font-bold underline text-amber-700 dark:text-amber-300 block text-[10px] cursor-pointer"
+                        >
+                          {appLanguage === 'ms' ? '📱 Buka Panduan Tambah ke Skrin Utama iPhone →' : '📱 Open iPhone Home Screen Setup Guide →'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* State 2: Enabled - Clean User-Friendly Status & Test Actions */}
+              {fcmStatus === 'enabled' && registeredFid && (
+                <div className="space-y-2 pt-1">
+                  <div className="p-2.5 bg-emerald-500/10 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex items-center space-x-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                        {appLanguage === 'ms' ? 'Notifikasi Latar Belakang Aktif' : 'Background Notifications Active'}
+                      </p>
+                      <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80">
+                        {appLanguage === 'ms' 
+                          ? 'Peranti anda sedia menerima amaran tarikh akhir pesanan.' 
+                          : 'This device is ready to receive order deadline alerts.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Send Test Notification Button */}
+                  <button
+                    onClick={handleSendTest}
+                    disabled={testSending}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3 rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                  >
+                    {testSending ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{appLanguage === 'ms' ? 'Menghantar Ujian...' : 'Sending Test Push...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{appLanguage === 'ms' ? 'Uji Hantar Notifikasi (FCM)' : 'Send Test Notification (FCM)'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {testResult && (
+                    <div className={cn(
+                      "p-2 rounded-lg text-[10px] leading-tight font-medium border",
+                      testResult.success
+                        ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/40"
+                        : "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/40"
+                    )}>
+                      {testResult.message}
+                    </div>
+                  )}
+
+                  {/* Subtle, collapsible technical info tucked away */}
+                  <details className="text-[9px] text-subtext pt-0.5 opacity-70 hover:opacity-100 transition-opacity">
+                    <summary className="cursor-pointer hover:underline font-semibold flex items-center justify-between">
+                      <span>{appLanguage === 'ms' ? 'Maklumat Teknikal Peranti (FID)' : 'Technical Device Info (FID)'}</span>
+                      <span className="font-mono text-[8px]">{registeredFid.substring(0, 8)}...</span>
+                    </summary>
+                    <div className="mt-1.5 p-2 bg-white dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[8px] text-subtext select-all break-all">{registeredFid}</span>
+                        <button
+                          type="button"
+                          onClick={handleCopyFid}
+                          className="ml-2 font-bold text-primary hover:underline flex items-center space-x-0.5 cursor-pointer shrink-0"
+                        >
+                          <Copy className="w-2.5 h-2.5" />
+                          <span>{copied ? (appLanguage === 'ms' ? 'Disalin' : 'Copied') : (appLanguage === 'ms' ? 'Salin' : 'Copy')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              {/* How to receive notifications when app is closed guide */}
+              <details className="text-[10px] text-subtext bg-gray-50 dark:bg-zinc-900/60 p-2 rounded-xl border border-gray-100 dark:border-zinc-800">
+                <summary className="font-bold text-text cursor-pointer hover:text-primary transition-colors flex items-center justify-between">
+                  <span>{appLanguage === 'ms' ? '💡 Cara terima notifikasi tanpa buka webapp' : '💡 How to receive notifications when closed'}</span>
+                </summary>
+                <div className="pt-2 space-y-1.5 leading-relaxed text-subtext border-t border-gray-100 dark:border-zinc-800 mt-1.5">
+                  <p>
+                    <strong className="text-text">1. {appLanguage === 'ms' ? 'Aktifkan Notifikasi:' : 'Enable Notifications:'}</strong> {appLanguage === 'ms' ? 'Klik butang "Aktifkan Notifikasi" di atas dan pilih "Allow".' : 'Click "Enable Notifications" above and allow permissions in your browser.'}
+                  </p>
+                  <p>
+                    <strong className="text-text">2. {appLanguage === 'ms' ? 'iPhone & PWA:' : 'iPhone & PWA:'}</strong> {appLanguage === 'ms' ? 'Pada iPhone/iPad, Apple mewajibkan aplikasi ditambah ke Skrin Utama ("Add to Home Screen") dahulu untuk mengaktifkan Web Push (iOS 16.4+).' : 'On iPhone/iPad, Apple requires "Add to Home Screen" first to enable Web Push (iOS 16.4+).'}
+                  </p>
+                  <p>
+                    <strong className="text-text">3. {appLanguage === 'ms' ? 'Tetapan Sistem Peranti:' : 'Device System Settings:'}</strong> {appLanguage === 'ms' ? 'Pastikan kebenaran notifikasi pelayar dibenarkan dalam Settings Windows/Mac/Android/iOS anda.' : 'Ensure browser/app notifications are enabled in your OS system settings.'}
+                  </p>
+                  <p className="text-[9px] opacity-80 italic">
+                    {appLanguage === 'ms' ? '⚡ Pelayan automatik menyemak tarikh akhir pesanan setiap 30 saat dan menghantar notifikasi push latar belakang terus ke peranti anda.' : '⚡ The server checks order deadlines every 30 seconds and delivers push notifications in the background to your device.'}
+                  </p>
+                </div>
+              </details>
+            </div>
+
+            {/* List of notifications */}
+            {notifications.length > 0 ? (
+              notifications.map((item) => {
+                const isUnread = !readIds.includes(item.id);
+                const badgeInfo = getSeverityBadge(item.severity);
+                const IconComponent = badgeInfo.icon;
+
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => handleNotificationClick(item)}
+                    className={cn(
+                      "p-3 rounded-xl transition-all flex items-start space-x-3 cursor-pointer relative group text-left border border-transparent",
+                      isUnread
+                        ? "bg-primary/5 dark:bg-primary/10 border-primary/10 font-medium"
+                        : "hover:bg-gray-50 dark:hover:bg-zinc-800/40 opacity-80"
+                    )}
+                  >
+                    <div className={cn("p-2 rounded-xl border shrink-0", badgeInfo.bg)}>
+                      <IconComponent className="w-4 h-4" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-text truncate">
+                          {item.title}
+                        </h3>
+                        {isUnread && (
+                          <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-subtext leading-snug mt-0.5">
+                        {item.message}
+                      </p>
+
+                      {item.actionText && (
+                        <div className="mt-2">
+                          <span className="text-[10px] font-bold text-primary hover:underline inline-flex items-center space-x-1">
+                            <span>{item.actionText}</span>
+                            <span>&rarr;</span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-8 text-center space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto opacity-80" />
+                <p className="text-xs font-bold text-text">
+                  {appLanguage === 'ms' ? 'Tiada Pemberitahuan Baru' : 'No New Notifications'}
+                </p>
+                <p className="text-[11px] text-subtext">
+                  {appLanguage === 'ms' ? 'Semua pesanan anda dalam keadaan teratur.' : 'All your orders are up to date.'}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* iOS PWA Step-by-Step Installation Modal */}
+      {showIOSModal && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowIOSModal(false)}
+        >
+          <div 
+            className="w-full max-w-sm sm:max-w-md bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 rounded-3xl shadow-2xl p-5 space-y-4 text-left animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-zinc-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text">
+                    {appLanguage === 'ms' ? 'Panduan Notifikasi iPhone / iPad' : 'iPhone / iPad Notification Guide'}
+                  </h3>
+                  <p className="text-[11px] text-subtext font-medium">
+                    {appLanguage === 'ms' ? 'Syarat Web Push Apple (iOS 16.4+)' : 'Apple Web Push Requirement (iOS 16.4+)'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIOSModal(false)}
+                className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 text-subtext hover:text-text transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Why Explanation */}
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-2xl border border-blue-100 dark:border-blue-900/40 text-[11px] text-blue-900 dark:text-blue-200 leading-relaxed">
+              <strong>{appLanguage === 'ms' ? 'Mengapa perlu langkah ini?' : 'Why is this step required?'}</strong>
+              <p className="mt-0.5 opacity-90">
+                {appLanguage === 'ms'
+                  ? 'Pada iOS, Apple menyekat notifikasi push dalam tab pelayar Safari biasa. Notifikasi HANYA dibenarkan selepas aplikasi ini ditambah ke Skrin Utama.'
+                  : 'On iOS, Apple disables push notifications inside standard Safari tabs. Push is ONLY permitted once the web app is added to your Home Screen.'}
+              </p>
+            </div>
+
+            {/* Step by step */}
+            <div className="space-y-2.5 pt-1">
+              {/* Step 1 */}
+              <div className="flex items-start space-x-3 p-2.5 rounded-2xl bg-gray-50 dark:bg-zinc-800/50 border border-gray-100 dark:border-zinc-800">
+                <div className="w-7 h-7 rounded-full bg-primary text-white font-black text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  1
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs font-bold text-text">
+                      {appLanguage === 'ms' ? 'Tekan Butang Kongsi (Share)' : 'Tap the Share Button'}
+                    </span>
+                    <Share2 className="w-3.5 h-3.5 text-primary" />
+                  </div>
+                  <p className="text-[11px] text-subtext mt-0.5 leading-snug">
+                    {appLanguage === 'ms'
+                      ? 'Di bar bawah pelayar Safari iPhone anda, tekan butang Kongsi (ikon segi empat dengan anak panah ke atas ⎋).'
+                      : 'In Safari bottom navigation toolbar, tap the Share icon (square with upward arrow ⎋).'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="flex items-start space-x-3 p-2.5 rounded-2xl bg-gray-50 dark:bg-zinc-800/50 border border-gray-100 dark:border-zinc-800">
+                <div className="w-7 h-7 rounded-full bg-primary text-white font-black text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  2
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs font-bold text-text">
+                      {appLanguage === 'ms' ? 'Pilih "Tambah ke Skrin Utama"' : 'Select "Add to Home Screen"'}
+                    </span>
+                    <PlusSquare className="w-3.5 h-3.5 text-emerald-500" />
+                  </div>
+                  <p className="text-[11px] text-subtext mt-0.5 leading-snug">
+                    {appLanguage === 'ms'
+                      ? 'Skrol menu ke bawah, tekan "Tambah ke Skrin Utama" (Add to Home Screen ➕), kemudian tekan "Tambah" (Add) di sudut kanan atas.'
+                      : 'Scroll down the share sheet, select "Add to Home Screen" ➕, then tap "Add" in the top right corner.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div className="flex items-start space-x-3 p-2.5 rounded-2xl bg-gray-50 dark:bg-zinc-800/50 border border-gray-100 dark:border-zinc-800">
+                <div className="w-7 h-7 rounded-full bg-primary text-white font-black text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  3
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs font-bold text-text">
+                      {appLanguage === 'ms' ? 'Buka dari Skrin Utama & Aktifkan' : 'Open from Home Screen & Enable'}
+                    </span>
+                    <Bell className="w-3.5 h-3.5 text-amber-500" />
+                  </div>
+                  <p className="text-[11px] text-subtext mt-0.5 leading-snug">
+                    {appLanguage === 'ms'
+                      ? 'Keluar dari Safari, buka ikon "Order Sub" baru di Skrin Utama anda. Tekan loceng di atas dan pilih "Aktifkan Notifikasi" -> "Allow".'
+                      : 'Exit Safari, launch the newly created "Order Sub" icon on your Home Screen. Open the bell menu and tap "Enable Notifications" -> "Allow".'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestAudioChime}
+                className="flex-1 bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-700 text-text font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-primary" />
+                <span>{audioTestPlayed ? (appLanguage === 'ms' ? 'Bunyi Berjaya!' : 'Chime Played!') : (appLanguage === 'ms' ? 'Uji Bunyi Peringatan' : 'Test Sound Alert')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowIOSModal(false)}
+                className="flex-1 bg-primary hover:bg-primary/90 text-white font-bold text-xs py-2.5 px-3 rounded-xl shadow-md transition-all cursor-pointer text-center"
+              >
+                {appLanguage === 'ms' ? 'Faham, Terima Kasih' : 'Got it, Thanks'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

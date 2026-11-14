@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Order Submission",
+  "description": "Offline-capable professional order submission and invoice generating tool.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

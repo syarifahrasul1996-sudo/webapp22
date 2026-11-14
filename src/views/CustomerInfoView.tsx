@@ -1,0 +1,1284 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { RefreshCcw, Save, Check, ExternalLink, LogOut, AlertCircle, ChevronDown } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useAppContext } from '../AppContext';
+import { calculateDeadline, formatPhoneUniversal, parseDateStringToTimestamp, smartFetchGoogleScript, normalizeUrgencyForSheet } from '../utils';
+import { Toast } from '../components/Toast';
+import { SetupHelper } from '../components/SetupHelper';
+import { cn } from '../cn';
+import { DEFAULT_SCRIPT_URL, DEFAULT_SPREADSHEET_ID, withScriptKey } from '../config';
+
+function generateOrderId() {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `ORD-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+function jsonpRequest<T>(url: string, params: Record<string, string | number | boolean>): Promise<T> {
+  const queryParts: string[] = [];
+  Object.entries(params).forEach(([key, value]) => {
+    queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+  });
+  const separator = url.includes('?') ? '&' : '?';
+  const fullUrl = url + (queryParts.length > 0 ? separator + queryParts.join('&') : '');
+  return smartFetchGoogleScript<T>(fullUrl);
+}
+
+export function CustomerInfoView() {
+  const { appLanguage, state, setState, goHome, viewStack, updateOrderHistoryState, updateSpecificHistoryItem, addToOfflineQueue, saveAsDraft: contextSaveAsDraft, deleteDraft, history, setHistory, resetOrderForm } = useAppContext();
+  const isActive = viewStack[viewStack.length - 1] === 'customer-info';
+
+  const computeInitialValues = useCallback(() => {
+    // Check if state.historyId points to an order already saved in history and we are not in edit mode
+    const isCompletedHistoryOrder = Boolean(
+      state.historyId && 
+      !state.isEditMode && 
+      history?.some(h => h.id === state.historyId && (h.state?.customerName || h.state?.syncStatus === 'synced'))
+    );
+
+    let initOrder = '';
+    if (state.mainType === 'Resume') {
+      initOrder = state.isEditMode ? 'Edit Resume' : 'Resume';
+    } else if (state.mainType === 'Surat') {
+      initOrder = 'Surat';
+    } else if (state.mainType === 'Edit PDF') {
+      initOrder = 'Edit PDF';
+    } else if (state.mainType === 'Lain-lain') {
+      initOrder = 'Lain2';
+    }
+
+    let initBahasa = '';
+    const isNewResume = state.mainType === 'Resume' && !state.isEditMode;
+    const isSurat = state.mainType === 'Surat';
+    const isLainLain = state.mainType === 'Lain-lain';
+    
+    // Only prefill if the user went through a flow that asks for language
+    if (isNewResume || isSurat || isLainLain) {
+      if (Array.isArray(state.resumeLangs)) {
+        if (state.resumeLangs.length === 2) initBahasa = '2 bahasa';
+        else if (state.resumeLangs.length === 1) initBahasa = state.resumeLangs[0];
+      }
+    }
+
+    let initJenis = 'Tidak Urgent';
+    if (state.customerJenis) {
+      initJenis = normalizeUrgencyForSheet(state.customerJenis);
+    } else if (state.urgency) {
+      initJenis = normalizeUrgencyForSheet(state.urgency);
+    }
+
+    const isSuperUrgent = state.urgency === 'super';
+    const addonHours = (state.mainType === 'Resume' && !state.isEditMode && isSuperUrgent && state.addons && Array.isArray(state.addons)) ? state.addons.length : 0;
+    const total = (state.baseHours || 0) + (state.extraHours || 0) + addonHours;
+    const baseTime = state.timestamp ? state.timestamp : Date.now();
+    const dl = new Date(baseTime + total * 3600000);
+    const formattedDate = `${String(dl.getDate()).padStart(2, '0')}/${String(dl.getMonth() + 1).padStart(2, '0')}/${dl.getFullYear()}`;
+    const formattedTime = dl.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+    let initTemplate = '';
+    if (state.mainType === 'Resume' && !state.isEditMode) {
+      initTemplate = state.template || '';
+    }
+
+    let initAddOnList: string[] = [];
+    if (state.addons && Array.isArray(state.addons)) {
+      state.addons.forEach((a: string) => {
+        if (a === 'Soft Copy Word') {
+          if (state.softcopyLang === 'English') initAddOnList.push('Editable softcopy BI');
+          else if (state.softcopyLang === 'Melayu') initAddOnList.push('Editable softcopy BM');
+          else initAddOnList.push('Editable softcopy BI'); 
+        } else if (a === 'Cover Letter') {
+          if (state.clLangs && Array.isArray(state.clLangs)) {
+            if (state.clLangs.includes('English')) initAddOnList.push('Cover Letter BI');
+            if (state.clLangs.includes('Melayu')) initAddOnList.push('Cover Letter BM');
+          }
+        } else if (a === 'ATS Resume' || a === 'ATS') {
+          initAddOnList.push('ATS');
+        } else {
+          initAddOnList.push(a);
+        }
+      });
+    }
+    const initAddOn = initAddOnList.join(', ');
+
+    const validDropdownOptions = [
+      'Editable softcopy BI',
+      'Editable softcopy BM',
+      'ATS',
+      'Cover Letter BI',
+      'Cover Letter BM',
+      'Resign Letter',
+      'Fail',
+      'Nota Temuduga',
+      'Pakej Temuduga Kerajaan'
+    ];
+
+    let initAddOnDropdown = '';
+    const addOnToCheck = String(state.customerAddOn || initAddOn).trim();
+    if (addOnToCheck) {
+      if (validDropdownOptions.includes(addOnToCheck)) {
+        initAddOnDropdown = addOnToCheck;
+      } else {
+        const normalizedCheck = addOnToCheck.toLowerCase();
+        const found = validDropdownOptions.find(opt => {
+          const normOpt = opt.toLowerCase();
+          return normalizedCheck.includes(normOpt) || normOpt.includes(normalizedCheck);
+        });
+        if (found) {
+          initAddOnDropdown = found;
+        } else {
+          const parts = addOnToCheck.split(',').map(p => p.trim().toLowerCase());
+          const matchPart = validDropdownOptions.find(opt => parts.includes(opt.toLowerCase()));
+          if (matchPart) {
+            initAddOnDropdown = matchPart;
+          }
+        }
+      }
+    }
+
+    let initOrderId = state.orderId;
+    if (!initOrderId || isCompletedHistoryOrder) {
+      initOrderId = generateOrderId();
+    }
+
+    let initDue = '';
+    if (state.isDueInvalid) {
+      const originalDue = (state.customerDue || '').toString().trim();
+      if (originalDue) {
+        initDue = originalDue; // Keep the "wrong" text as requested
+      } else {
+        // Build suggested date based on filters
+        const d = new Date();
+        const y = state.dashboardFilterYear || d.getFullYear().toString();
+        const m = state.dashboardFilterMonth && state.dashboardFilterMonth !== 'all' 
+          ? state.dashboardFilterMonth.padStart(2, '0') 
+          : (d.getMonth() + 1).toString().padStart(2, '0');
+        
+        // Time keep empty as requested
+        initDue = ` /${m}/${y}`;
+      }
+    } else {
+      initDue = state.customerDue ? String(state.customerDue) : `${formattedDate} at ${formattedTime}`;
+    }
+
+    return { 
+      initName: isCompletedHistoryOrder ? '' : (state.customerName || (state as any).name || ''),
+      initPhone: isCompletedHistoryOrder ? '' : (state.customerPhone || (state as any).phone || ''),
+      initOrder: isCompletedHistoryOrder ? (initOrder || 'Resume') : (state.customerOrder ? String(state.customerOrder) : initOrder), 
+      initBahasa: isCompletedHistoryOrder ? initBahasa : (state.customerBahasa ? String(state.customerBahasa) : initBahasa), 
+      initType: state.mainType || 'Resume',
+      initSubType: state.subType || '',
+      initUrgency: state.urgency || 'normal',
+      initJenis: isCompletedHistoryOrder ? initJenis : (state.customerJenis ? String(state.customerJenis) : initJenis), 
+      initDue: isCompletedHistoryOrder ? `${formattedDate} at ${formattedTime}` : initDue, 
+      initDueTimestamp: state.dueTimestamp || dl.getTime(),
+      initTemplate: isCompletedHistoryOrder ? initTemplate : (state.customerTemplate || initTemplate), 
+      initAddOn: isCompletedHistoryOrder ? initAddOn : (state.customerAddOn || initAddOn),
+      initAddOnDropdown,
+      initInfo: isCompletedHistoryOrder ? '' : (state.customerInfo || ''),
+      initLink: isCompletedHistoryOrder ? '' : (state.googleSheetLink || state.orderLink || ''),
+      initOrderId,
+      initPrice: isCompletedHistoryOrder || state.price === undefined ? '' : String(state.price),
+    };
+  }, [state, history, appLanguage]);
+
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [info, setInfo] = useState('');
+  const [link, setLink] = useState('');
+  
+  const [order, setOrder] = useState('');
+  const [template, setTemplate] = useState('');
+  const [bahasa, setBahasa] = useState('');
+  const [addOn, setAddOn] = useState('');
+  const [jenis, setJenis] = useState('');
+  const [due, setDue] = useState('');
+  const [dueTimestamp, setDueTimestamp] = useState(0);
+  const [orderId, setOrderId] = useState('');
+  const [price, setPrice] = useState('');
+  const [isAddOnOpen, setIsAddOnOpen] = useState(false);
+  const addOnRef = useRef<HTMLDivElement>(null);
+
+  const [spreadsheetId, setSpreadsheetId] = useState(state.spreadsheetId);
+  const webhookUrl = DEFAULT_SCRIPT_URL;
+  const [isSaving, setIsSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isInIframe, setIsInIframe] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  
+  // Form session recovery state
+  const [showResumeBanner, setShowResumeBanner] = useState(false);
+  const isInitializingRef = useRef(true);
+  const isSubmittedRef = useRef(false);
+
+  const clearAllFields = () => {
+    setName('');
+    setPhone('');
+    setInfo('');
+    setLink('');
+    setOrder('');
+    setTemplate('');
+    setBahasa('');
+    setAddOn('');
+    setJenis('');
+    setDue('');
+    setDueTimestamp(0);
+    setOrderId('');
+    setPrice('');
+    
+    resetOrderForm();
+  };
+
+  const showToastMessage = (msg: string) => {
+    setToastMsg(msg);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  useEffect(() => {
+    try {
+      setIsInIframe(window.self !== window.top);
+    } catch (e) {
+      setIsInIframe(true);
+    }
+  }, []);
+
+  // Re-compute when navigating here or state changes
+  useEffect(() => {
+    if (isActive) {
+      isInitializingRef.current = true;
+      isSubmittedRef.current = false;
+      setSaved(false);
+      setIsSaving(false);
+      setErrorMsg('');
+      const initVals = computeInitialValues();
+      setName(initVals.initName);
+      setPhone(initVals.initPhone);
+      setInfo(initVals.initInfo);
+      setLink(initVals.initLink);
+      setOrder(initVals.initOrder);
+      setTemplate(initVals.initTemplate);
+      setBahasa(initVals.initBahasa);
+      setAddOn(initVals.initAddOn);
+      setJenis(initVals.initJenis);
+      setDue(initVals.initDue);
+      setDueTimestamp(initVals.initDueTimestamp);
+      setOrderId(initVals.initOrderId);
+      setPrice(initVals.initPrice);
+      setSpreadsheetId(state.spreadsheetId);
+
+      // Check if there is unsaved progress to restore
+      try {
+        const savedProgress = localStorage.getItem('customer_form_progress');
+        if (savedProgress) {
+          const data = JSON.parse(savedProgress);
+          // Has meaningful unsaved data?
+          const hasUnsavedData = (data.name && data.name.trim()) || 
+                                 (data.phone && data.phone.trim()) || 
+                                 (data.info && data.info.trim()) || 
+                                 (data.link && data.link.trim());
+          
+          if (hasUnsavedData) {
+            // Is it actually different from the computed active order details?
+            const isDifferent = data.name !== initVals.initName ||
+                                data.phone !== initVals.initPhone ||
+                                data.info !== initVals.initInfo ||
+                                data.link !== initVals.initLink ||
+                                data.order !== initVals.initOrder ||
+                                data.template !== initVals.initTemplate ||
+                                data.bahasa !== initVals.initBahasa ||
+                                data.addOn !== initVals.initAddOn ||
+                                data.jenis !== initVals.initJenis ||
+                                data.due !== initVals.initDue;
+            
+            if (isDifferent) {
+              setShowResumeBanner(true);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking form progress recovery in localStorage:', e);
+      }
+
+      const timer = setTimeout(() => {
+        isInitializingRef.current = false;
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isActive, state.historyId, state.timestamp]); // fetch when mounted or when switching orders
+
+  const handleResumeProgress = () => {
+    try {
+      const savedProgress = localStorage.getItem('customer_form_progress');
+      if (savedProgress) {
+        const data = JSON.parse(savedProgress);
+        if (data.name !== undefined) setName(data.name);
+        if (data.phone !== undefined) setPhone(data.phone);
+        if (data.info !== undefined) setInfo(data.info);
+        if (data.link !== undefined) setLink(data.link);
+        if (data.order !== undefined) setOrder(data.order);
+        if (data.template !== undefined) setTemplate(data.template);
+        if (data.bahasa !== undefined) setBahasa(data.bahasa);
+        if (data.addOn !== undefined) setAddOn(data.addOn);
+        if (data.jenis !== undefined) setJenis(data.jenis);
+        if (data.due !== undefined) setDue(data.due);
+        if (data.dueTimestamp !== undefined) setDueTimestamp(data.dueTimestamp);
+        if (data.orderId !== undefined) setOrderId(data.orderId);
+        if (data.price !== undefined) setPrice(data.price);
+        
+        showToastMessage(appLanguage === 'ms' ? 'Kemajuan borang telah dipulihkan!' : 'Form progress restored!');
+      }
+    } catch (e) {
+      console.error("Failed to resume progress:", e);
+    }
+    setShowResumeBanner(false);
+  };
+
+  const handleDismissProgress = () => {
+    localStorage.removeItem('customer_form_progress');
+    setShowResumeBanner(false);
+  };
+
+  const syncStateAndSave = (isDraftSave = false) => {
+    // Sync state one last time before saving
+    setState(prev => ({
+      ...prev,
+      customerName: name,
+      customerPhone: phone,
+      customerOrder: order,
+      customerTemplate: template,
+      customerBahasa: bahasa,
+      customerAddOn: addOn,
+      customerJenis: jenis,
+      customerDue: due,
+      dueTimestamp: dueTimestamp,
+      customerInfo: info,
+      orderLink: link,
+      googleSheetLink: link,
+      orderId: orderId,
+      price: price ? parseFloat(price) : undefined,
+    }));
+    
+    if (isDraftSave) {
+        // Only save draft if it's a transient draft, NOT a completed order in local history or remote search result
+        const isRealOrder = state.historyId && (!state.historyId.startsWith('draft_') || history?.some(item => item.id === state.historyId));
+        if (!isRealOrder) {
+          contextSaveAsDraft();
+          showToastMessage(appLanguage === 'ms' ? 'Draf disimpan secara lokal!' : 'Draft saved locally!');
+        }
+    }
+  };
+
+  const handleSaveDraft = () => {
+    syncStateAndSave(true);
+  };
+
+  // Debounced Auto-Save
+  useEffect(() => {
+    if (isActive && !isSubmittedRef.current) {
+      const timer = setTimeout(() => {
+        syncStateAndSave(true);
+      }, 5000); 
+      return () => clearTimeout(timer);
+    }
+  }, [name, phone, order, template, bahasa, addOn, jenis, due, info, link, orderId, isActive]);
+
+  // Save form progress to localStorage with a debounce
+  useEffect(() => {
+    if (isActive && !showResumeBanner && !isInitializingRef.current && !isSubmittedRef.current) {
+      const timer = setTimeout(() => {
+        const data = {
+          name,
+          phone,
+          info,
+          link,
+          order,
+          template,
+          bahasa,
+          addOn,
+          jenis,
+          due,
+          dueTimestamp,
+          orderId,
+          price,
+          savedAt: Date.now()
+        };
+        localStorage.setItem('customer_form_progress', JSON.stringify(data));
+      }, 1000); // 1s debounce to align updates nicely
+      return () => clearTimeout(timer);
+    }
+  }, [name, phone, info, link, order, template, bahasa, addOn, jenis, due, dueTimestamp, orderId, price, isActive, showResumeBanner]);
+
+  const handleSaveInfo = async () => {
+    if (!name.trim() || !phone.trim()) {
+      setErrorMsg(appLanguage === 'ms' ? 'Sila isi semua ruangan.' : 'Please fill all fields.');
+      return;
+    }
+    
+    // Cleanup draft if it exists
+    if (state.historyId) {
+        deleteDraft(state.historyId);
+    }
+
+    const parsedObj = parseDateStringToTimestamp(due, dueTimestamp);
+    const parsedTimestamp = parsedObj.timestamp;
+    const targetDate = parsedObj.date;
+
+    const orderYear = String(targetDate.getFullYear());
+    let resolvedSpreadsheetId = spreadsheetId || state.spreadsheetId || DEFAULT_SPREADSHEET_ID;
+    let resolvedWebhookUrl = webhookUrl.trim();
+
+    try {
+      const savedSheets = localStorage.getItem('db_annual_sheets');
+      if (savedSheets) {
+        const parsed = JSON.parse(savedSheets);
+        if (Array.isArray(parsed)) {
+          const matches = parsed.find(s => s.year === orderYear);
+          if (matches) {
+            if (matches.spreadsheetId && matches.spreadsheetId.trim()) {
+              const rawInput = matches.spreadsheetId.trim();
+              if (rawInput.includes('docs.google.com/spreadsheets/d/')) {
+                const matchedId = rawInput.match(/\/d\/([a-zA-Z0-9-_]+)/);
+                resolvedSpreadsheetId = matchedId ? matchedId[1] : rawInput;
+              } else {
+                resolvedSpreadsheetId = rawInput;
+              }
+            }
+            if (matches.scriptUrl && matches.scriptUrl.trim()) {
+              resolvedWebhookUrl = matches.scriptUrl.trim();
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error reading db_annual_sheets:", err);
+    }
+
+    // Default fallbacks for each year if not customized
+    if (resolvedSpreadsheetId === DEFAULT_SPREADSHEET_ID || !resolvedSpreadsheetId) {
+      if (orderYear === '2024') {
+        resolvedSpreadsheetId = '1B9zdWXVLnvj0jNNVnKxcb6cJnS1VLCIdB4j-RR3wOlg';
+      } else if (orderYear === '2025') {
+        resolvedSpreadsheetId = '1myU9apnYWWtU3snnCw14qI6ZS05i4DY6oOswLz1sCwo';
+      } else if (orderYear === '2026') {
+        resolvedSpreadsheetId = DEFAULT_SPREADSHEET_ID;
+      }
+    }
+// Format phone first using our universal helper
+const formattedPhone = formatPhoneUniversal(phone);
+setPhone(formattedPhone);
+
+let updatedInfo = info;
+if (/(No\.?\s*Telefon(?:\s*\/\s*Username)?|Phone(?:\s*Number)?(?:\s*\/\s*Username)?|WhatsApp)\s*:\s*.*/i.test(info)) {
+  updatedInfo = info.replace(
+    /(No\.?\s*Telefon(?:\s*\/\s*Username)?|Phone(?:\s*Number)?(?:\s*\/\s*Username)?|WhatsApp)\s*:\s*.*/i,
+    `$1: ${formattedPhone}`
+  );
+} else if (/(Username|User\s*ID)\s*:\s*.*/i.test(info)) {
+  updatedInfo = info.replace(
+    /(Username|User\s*ID)\s*:\s*.*/i,
+    `$1: ${formattedPhone}`
+  );
+}
+
+setInfo(updatedInfo);
+
+const oldIdToSend = orderId;
+let finalOrderId = orderId;
+
+// Check if we need to upgrade a temporary ID or empty ID to a permanent one
+if (!finalOrderId || finalOrderId.trim() === "" || finalOrderId.indexOf("SYNC-") === 0) {
+  finalOrderId = generateOrderId();
+  setOrderId(finalOrderId);
+  console.log("Pre-upgraded ID client-side:", oldIdToSend, "->", finalOrderId);
+
+  // 1. Rename existing history item in local memory (so updateOrderHistoryState updates it instead of duplicating)
+  setHistory(prev => {
+    return prev.map(item => {
+      if (item.id === state.historyId || item.id === oldIdToSend || (item.state && item.state.orderId === oldIdToSend)) {
+        return {
+          ...item,
+          id: finalOrderId,
+          state: {
+            ...item.state,
+            orderId: finalOrderId,
+            historyId: finalOrderId,
+          }
+        };
+      }
+      return item;
+    });
+  });
+}
+
+    // Format name and template correctly
+    const finalFormattedName = name.trim().replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+    const finalFormattedTemplate = template.trim().toUpperCase();
+    const finalJenis = normalizeUrgencyForSheet(jenis);
+
+    // Save the new values to global state + history with syncing status
+    updateOrderHistoryState({
+      customerName: finalFormattedName,
+      customerPhone: formattedPhone,
+      customerInfo: updatedInfo,
+      orderLink: link,
+      googleSheetLink: link,
+      customerOrder: order,
+      customerTemplate: finalFormattedTemplate,
+      customerBahasa: bahasa,
+      customerAddOn: addOn,
+      customerJenis: finalJenis,
+      customerDue: due,
+      dueTimestamp: parsedTimestamp,
+      hasNotified: false,
+      orderId: finalOrderId,
+      historyId: finalOrderId,
+      price: price ? parseFloat(price) : undefined,
+      spreadsheetId: resolvedSpreadsheetId,
+      scriptUrl: resolvedWebhookUrl,
+      syncStatus: 'syncing',
+    });
+
+    setDueTimestamp(parsedTimestamp);
+    setErrorMsg('');
+    setIsSaving(true);
+    setSaved(false);
+
+    try {
+      // Columns: Checkbox, Nama, Phone Number, Order, Template, Bahasa, Add On, Jenis, Due, Link, Order ID
+      const orderRow = [
+        state.isDelivered || false,
+        finalFormattedName,
+        formattedPhone,
+        order,
+        finalFormattedTemplate || "",
+        bahasa || "",
+        addOn || "",
+        finalJenis,
+        due,
+        link || "",
+        finalOrderId || "",
+        price ? price.toString() : ""
+      ].map(v => v == null ? "" : v);
+      
+      const monthNamesEn = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const monthNamesMs = ["Januari", "Februari", "Mac", "April", "Mei", "Jun", "Julai", "Ogos", "September", "Oktober", "November", "Disember"];
+      
+      // Send both language variants so the backend can try both if needed
+      const targetSheetEn = `${monthNamesEn[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
+      const targetSheetMs = `${monthNamesMs[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
+
+      const payload = {
+        rowData: orderRow,
+        sheetName: targetSheetEn, // Fallback for older script version
+        sheetNameEn: targetSheetEn,
+        sheetNameMs: targetSheetMs,
+        spreadsheetId: resolvedSpreadsheetId
+      };
+      
+      console.log("Submitting payload to Google Apps Script:", JSON.stringify(payload, null, 2));
+
+      // Offline check & queue
+      if (!navigator.onLine) {
+        try {
+          addToOfflineQueue(payload, resolvedWebhookUrl, finalOrderId);
+          isSubmittedRef.current = true;
+          clearAllFields();
+          setSaved(true);
+          showToastMessage(appLanguage === 'ms' ? 'Luar Talian: Disimpan dalam Que & Ruangan Dipadam' : 'Offline: Saved to Queue & Fields Cleared');
+          setTimeout(() => goHome(), 1800);
+          return;
+        } catch (e) {
+          throw new Error('Failed to save to offline queue.');
+        }
+      }
+
+      // Optimistic instant response
+      isSubmittedRef.current = true;
+      clearAllFields();
+      setSaved(true);
+      showToastMessage(appLanguage === 'ms' ? 'Berjaya dihantar & ruangan maklumat dipadam!' : 'Successfully submitted & fields cleared!');
+      setIsSaving(false);
+      setTimeout(() => goHome(), 1500);
+
+      // Perform background update_order via JSONP
+      const jsonpParams = {
+        action: 'update_order',
+        spreadsheetId: resolvedSpreadsheetId,
+        orderId: finalOrderId,
+        oldOrderId: oldIdToSend || "",
+        isDelivered: state.isDelivered || false,
+        name: finalFormattedName,
+        phone: formattedPhone,
+        order: order,
+        template: finalFormattedTemplate || "",
+        bahasa: bahasa || "",
+        addon: addOn || "",
+        jenis: finalJenis,
+        due: due,
+        link: link || "",
+        price: price ? price.toString() : ""
+      };
+
+      const triggerPostFallback = () => {
+        console.log("Executing no-cors POST update_order fallback...");
+        fetch(resolvedWebhookUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify(withScriptKey(payload))
+        }).then(() => {
+          console.log("no-cors POST fallback succeeded!");
+          resetOrderForm();
+          updateSpecificHistoryItem(finalOrderId, {
+            syncStatus: 'synced',
+            syncLastSuccess: Date.now(),
+            lastModifiedLocally: Date.now()
+          });
+        }).catch(postErr => {
+          console.error("POST fallback failed, adding to offline queue:", postErr);
+          addToOfflineQueue(payload, resolvedWebhookUrl, finalOrderId);
+          updateSpecificHistoryItem(finalOrderId, {
+            syncStatus: 'failed',
+            syncLastAttempt: Date.now()
+          });
+        });
+      };
+
+      jsonpRequest<{status: string; message?: string; orderId?: string; isUpgraded?: boolean}>(resolvedWebhookUrl, jsonpParams)
+        .then((resp) => {
+          if (resp && resp.status === 'success') {
+            console.log("JSONP update_order successful:", resp);
+            resetOrderForm();
+            const returnedId = resp.orderId || finalOrderId;
+            if (returnedId && returnedId !== finalOrderId) {
+              console.log("Upgraded orderId from", finalOrderId, "to", returnedId);
+              
+              // Update matching history item's ID & internal state
+              setHistory(prev => {
+                return prev.map(item => {
+                  if (item.id === finalOrderId || (item.state && item.state.orderId === finalOrderId)) {
+                    return {
+                      ...item,
+                      id: returnedId,
+                      state: {
+                        ...item.state,
+                        orderId: returnedId,
+                        historyId: returnedId,
+                        syncStatus: 'synced',
+                        syncLastSuccess: Date.now(),
+                        lastModifiedLocally: Date.now()
+                      }
+                    };
+                  }
+                  return item;
+                });
+              });
+            } else {
+              updateSpecificHistoryItem(finalOrderId, {
+                syncStatus: 'synced',
+                syncLastSuccess: Date.now(),
+                lastModifiedLocally: Date.now()
+              });
+            }
+          } else {
+            console.error("JSONP update_order returned error response:", resp);
+            triggerPostFallback();
+          }
+        })
+        .catch(err => {
+          console.error("JSONP update_order failed, running fallback:", err);
+          triggerPostFallback();
+        });
+      return;
+      
+    } catch (err: any) {
+      console.error(err);
+      let errMsg = err.message || 'Error occurred while saving';
+      if (errMsg.includes('Failed to fetch')) {
+        errMsg = 'Failed to fetch: You MUST deploy the Web App as "Execute as: Me" and "Who has access: Anyone". If it requires login, it will fail.';
+      }
+      setErrorMsg(errMsg);
+      showToastMessage(appLanguage === 'ms' ? 'Ralat, sila semak mesej ralat' : 'Failed, please see logs');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAutoFill = () => {
+    let newName = name;
+    let newOrder = order;
+    let newBahasa = bahasa;
+    let newTemplate = template;
+
+    const properCase = (str: string) => {
+      return str.trim().replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+    };
+
+    // 1. Extract Nama
+    const nameMatch = info.match(/(?:Nama Penuh|Full Name):\s*(.*)/i);
+    if (nameMatch && nameMatch[1].trim()) {
+      newName = properCase(nameMatch[1]);
+    }
+
+    // 1.2 Extract Template / Design Info
+    const templateMatch = info.match(/(?:Template|Pilihan Template|Template Info|Design):\s*(.*)/i);
+    if (templateMatch && templateMatch[1].trim()) {
+      newTemplate = templateMatch[1].trim().toUpperCase();
+    }
+
+    // 1.3 Extract Phone / WhatsApp Username
+    const phoneRegex = /(?:No\.?\s*Telefon|Phone(?:\s*Number)?|WhatsApp|Tel|Hp|No\.?\s*Hp)\s*:\s*(.*)/i;
+    const userRegex = /(?:Username|User\s*ID|Handle|IG|Telegram|TikTok|Shopee|Carousell)\s*:\s*(.*)/i;
+    const combinedRegex = /(?:No\.?\s*Telefon\s*\/\s*Username|Phone(?:\s*Number)?\s*\/\s*Username)\s*:\s*(.*)/i;
+
+    const combinedMatch = info.match(combinedRegex);
+    const pMatch = info.match(phoneRegex);
+    const uMatch = info.match(userRegex);
+
+    const isPValid = pMatch && pMatch[1]?.trim() && !['-', '--', 'n/a', 'na', 'none', 'tiada', 'nil', 'null'].includes(pMatch[1].trim().toLowerCase());
+    const isUValid = uMatch && uMatch[1]?.trim() && !['-', '--', 'n/a', 'na', 'none', 'tiada', 'nil', 'null'].includes(uMatch[1].trim().toLowerCase());
+
+    let extractedPhoneVal = '';
+    if (combinedMatch && combinedMatch[1]?.trim()) {
+      extractedPhoneVal = combinedMatch[1].trim();
+    } else if (isPValid && isUValid) {
+      extractedPhoneVal = `${pMatch[1].trim()} (${uMatch[1].trim()})`;
+    } else if (isPValid) {
+      extractedPhoneVal = pMatch[1].trim();
+    } else if (isUValid) {
+      extractedPhoneVal = uMatch[1].trim();
+    } else {
+      const genericMatch = info.match(/(?:No\.?\s*Telefon(?:\s*\/\s*Username)?|Phone(?:\s*Number)?(?:\s*\/\s*Username)?|WhatsApp|Username):\s*(.*)/i);
+      if (genericMatch && genericMatch[1]?.trim()) {
+        extractedPhoneVal = genericMatch[1].trim();
+      }
+    }
+
+    if (extractedPhoneVal) {
+      const trimmedVal = extractedPhoneVal.trim();
+      if (trimmedVal.startsWith('@')) {
+        setPhone(trimmedVal);
+      } else {
+        const extractedPhone = formatPhoneUniversal(extractedPhoneVal);
+        if (extractedPhone) {
+          setPhone(extractedPhone);
+        }
+      }
+    }
+
+    // 2. Extract Order
+    const uppercaseInfo = info.toUpperCase();
+    if (
+      uppercaseInfo.includes('MAKLUMAT PENGHANTAR') ||
+      uppercaseInfo.includes('MAKLUMAT PENERIMA') ||
+      uppercaseInfo.includes('JENIS / TUJUAN SURAT') ||
+      uppercaseInfo.includes('TARIKH SURAT')
+    ) {
+      newOrder = 'Surat';
+    } else if (uppercaseInfo.includes('BORANG RESUME')) {
+      newOrder = 'Resume';
+    }
+
+    // 3. Extract Bahasa
+    const bahasaMatch = info.match(/(?:Surat BM\/BI\?|Bahasa:|Language:)\s*(.*)/i);
+    if (bahasaMatch && bahasaMatch[1]) {
+      const val = bahasaMatch[1].toUpperCase();
+      if (val.includes('2 BAHASA') || val.includes('DUA BAHASA') || val.includes('BOTH') || (val.includes('BM') && val.includes('BI'))) {
+        newBahasa = '2 bahasa';
+      } else if (val.includes('BM') || val.includes('MELAYU')) {
+        newBahasa = 'Melayu';
+      } else if (val.includes('BI') || val.includes('ENGLISH') || val.includes('INGGERIS')) {
+        newBahasa = 'English';
+      }
+    }
+
+    setName(newName);
+    setOrder(newOrder);
+    setBahasa(newBahasa);
+    setTemplate(newTemplate);
+    showToastMessage(appLanguage === 'ms' ? 'Auto-isi terpakai!' : 'Auto-fill applied!');
+  };
+
+  if (saved) {
+    return (
+      <div className="flex flex-col p-6 space-y-6 text-center pb-[calc(env(safe-area-inset-bottom)+4rem)] min-h-[55vh] justify-center items-center">
+        <motion.div
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 350, damping: 22 }}
+          className="relative flex items-center justify-center mb-2"
+        >
+          {/* Subtle glow backdrop */}
+          <motion.div
+            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute w-24 h-24 sm:w-28 sm:h-28 bg-emerald-500/20 rounded-full blur-xl pointer-events-none"
+          />
+
+          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-2 border-emerald-500/30 rounded-3xl flex items-center justify-center shadow-lg shadow-emerald-500/15 relative z-10 backdrop-blur-sm">
+            <svg
+              className="w-10 h-10 sm:w-12 sm:h-12 stroke-emerald-600 dark:stroke-emerald-400"
+              viewBox="0 0 24 24"
+              fill="none"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <motion.path
+                d="M5 13l4 4L19 7"
+                initial={{ pathLength: 0 }}
+                animate={{ pathLength: 1 }}
+                transition={{ duration: 0.45, delay: 0.15, ease: "easeOut" }}
+              />
+            </svg>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.2 }}
+          className="space-y-2 max-w-xs mx-auto"
+        >
+          <h2 className="text-2xl sm:text-3xl font-black text-text tracking-tighter">
+            {appLanguage === 'ms' ? 'Berjaya Dihantar!' : 'Successfully Submitted!'}
+          </h2>
+          <p className="text-xs sm:text-sm font-medium text-subtext leading-relaxed">
+            {appLanguage === 'ms'
+              ? 'Maklumat telah disimpan ke Google Sheet & borang telah dipadam secara automatik.'
+              : 'Details saved to Google Sheet & form fields cleared automatically.'}
+          </p>
+        </motion.div>
+
+        {/* Redirect progress bar */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
+          className="w-48 h-1.5 bg-gray-100 dark:bg-zinc-800 rounded-full overflow-hidden mt-2"
+        >
+          <motion.div
+            initial={{ width: "0%" }}
+            animate={{ width: "100%" }}
+            transition={{ duration: 1.4, ease: "easeInOut" }}
+            className="h-full bg-emerald-500 rounded-full"
+          />
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col p-4 sm:p-5 pb-[calc(env(safe-area-inset-bottom)+6.5rem)]">
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-xl font-black text-text tracking-tighter">
+            {appLanguage === 'ms' ? 'Maklumat Pelanggan' : 'Customer Info'}
+          </h2>
+        </div>
+        <p className="text-subtext text-xs">
+          {appLanguage === 'ms' 
+            ? 'Simpan maklumat pelanggan untuk rujukan masa depan.' 
+            : 'Save customer info for future reference.'}
+        </p>
+      </div>
+
+      <div className="space-y-3.5">
+        {showResumeBanner && (
+          <div className="bg-amber-50 dark:bg-amber-950/20 text-amber-950 dark:text-amber-200 border border-amber-200/50 dark:border-amber-800/20 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between animate-fade-in mb-2">
+            <div className="flex gap-2.5 items-start">
+              <AlertCircle className="w-5.5 h-5.5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
+              <div>
+                <p className="text-xs font-black tracking-tight leading-none mb-1">
+                  {appLanguage === 'ms' ? 'Kemajuan Tidak Disimpan Dikesan' : 'Unsaved Progress Detected'}
+                </p>
+                <p className="text-[11px] text-amber-800/95 dark:text-amber-300/80 leading-snug">
+                  {appLanguage === 'ms' 
+                    ? 'Anda mempunyai data borang yang tidak disimpan dari sesi lepas.' 
+                    : 'You have unsaved form data from your previous session.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto shrink-0 pt-0.5 sm:pt-0">
+              <button
+                type="button"
+                onClick={handleResumeProgress}
+                className="flex-1 sm:flex-none px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs active:scale-95 transition-all shadow-sm"
+              >
+                {appLanguage === 'ms' ? 'Pulihkan' : 'Resume'}
+              </button>
+              <button
+                type="button"
+                onClick={handleDismissProgress}
+                className="flex-1 sm:flex-none px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 border border-amber-200/40 dark:border-amber-800/30 hover:bg-amber-100/30 text-amber-900 dark:text-amber-200 font-bold text-xs transition-colors"
+              >
+                {appLanguage === 'ms' ? 'Padam' : 'Discard'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {orderId && (
+          <div className="flex items-center space-x-2 ml-1">
+            <span className="text-[10px] font-bold text-subtext uppercase tracking-widest whitespace-nowrap">Order ID</span>
+            <span className="text-[10px] font-mono text-text bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded cursor-default border border-gray-200 dark:border-gray-700 select-all">{orderId}</span>
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">
+            {appLanguage === 'ms' ? 'Nama Pelanggan' : 'Customer Name'}
+          </label>
+          <input 
+            type="text" 
+            value={name}
+            onChange={(e) => {
+              const val = e.target.value;
+              // Capitalize first letter of each word in real-time as they type
+              const properVal = val.replace(/(^|\s)\S/g, (match) => match.toUpperCase());
+              setName(properVal);
+            }}
+            onBlur={() => setName(name.trim().replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase()))}
+            placeholder={appLanguage === 'ms' ? 'Cth: Ali bin Abu' : 'E.g. John Doe'}
+            className="w-full h-[46px] bg-surface rounded-xl px-4 font-bold text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all placeholder:text-gray-300 text-sm" 
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">
+            {appLanguage === 'ms' ? 'No. Telefon / Username' : 'Phone / Username'}
+          </label>
+          <input 
+            type="text" 
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            onBlur={() => setPhone(phone.trim().startsWith('@') ? phone.trim() : formatPhoneUniversal(phone))}
+            placeholder={appLanguage === 'ms' ? '01X-XXX XXXX atau @username' : '01X-XXX XXXX or @username'}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            className="w-full h-[46px] bg-surface rounded-xl px-4 font-bold text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all placeholder:text-gray-300 text-sm" 
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">Order</label>
+          <div className="relative">
+            <select 
+              value={order}
+              onChange={(e) => setOrder(e.target.value)}
+              className="w-full h-[46px] bg-surface text-text rounded-xl px-4 font-bold border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all appearance-none text-sm" 
+            >
+              <option value="Resume">Resume</option>
+              <option value="Surat">Surat</option>
+              <option value="Edit PDF">Edit PDF</option>
+              <option value="Lain2">Lain2</option>
+              <option value="Edit Resume">Edit Resume</option>
+              <option value=""></option>
+            </select>
+            <div className="absolute top-0 right-4 h-full flex items-center pointer-events-none">
+              <svg className="w-4 h-4 text-subtext" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">Template</label>
+          <input 
+            type="text" 
+            value={template}
+            onChange={(e) => setTemplate(e.target.value.toUpperCase())}
+            onBlur={() => setTemplate(template.trim().toUpperCase())}
+            className="w-full h-[46px] bg-surface rounded-xl px-4 font-bold text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all text-sm" 
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">Bahasa</label>
+          <div className="relative">
+            <select 
+              value={bahasa}
+              onChange={(e) => setBahasa(e.target.value)}
+              className="w-full h-[46px] bg-surface text-text rounded-xl px-4 font-bold border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all appearance-none text-sm" 
+            >
+              <option value="Melayu">Melayu</option>
+              <option value="English">English</option>
+              <option value="2 bahasa">2 bahasa</option>
+              <option value=""></option>
+            </select>
+            <div className="absolute top-0 right-4 h-full flex items-center pointer-events-none">
+              <svg className="w-4 h-4 text-subtext" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-1.5 col-span-full" ref={addOnRef}>
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">{appLanguage === 'ms' ? 'Add On (Boleh Pilih Lebih Dari 1)' : 'Add On (Select Multiple)'}</label>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsAddOnOpen(!isAddOnOpen)}
+              className="w-full h-[46px] bg-surface text-text rounded-xl px-4 font-bold border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all flex items-center justify-between text-sm text-left"
+            >
+              <span className="truncate pr-4 text-gray-500 font-semibold">
+                {appLanguage === 'ms' ? 'Pilih Add On...' : 'Select Add On...'}
+              </span>
+              <ChevronDown className={cn("w-4 h-4 text-subtext transition-transform shrink-0", isAddOnOpen && "rotate-180")} />
+            </button>
+            {isAddOnOpen && (
+              <div className="absolute z-10 w-full mt-2 bg-white dark:bg-[#1C1C1E] border border-gray-100 dark:border-gray-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-2 animate-fade-in-up">
+                {[
+                  'Editable softcopy BI',
+                  'Editable softcopy BM',
+                  'ATS',
+                  'Cover Letter BI',
+                  'Cover Letter BM',
+                  'Resign Letter',
+                  'Fail',
+                  'Nota Temuduga',
+                  'Pakej Temuduga Kerajaan'
+                ].map((option) => {
+                  const selectedAddons = addOn ? addOn.split(',').map(s => s.trim()).filter(Boolean) : [];
+                  const isSelected = selectedAddons.some(item => item.toLowerCase() === option.toLowerCase());
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => {
+                        let nextAddons;
+                        if (isSelected) {
+                          nextAddons = selectedAddons.filter(item => item.toLowerCase() !== option.toLowerCase());
+                        } else {
+                          nextAddons = [...selectedAddons, option];
+                        }
+                        setAddOn(nextAddons.join(', '));
+                      }}
+                      className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all hover:bg-gray-50 dark:hover:bg-zinc-800/50 cursor-pointer ${
+                        isSelected ? 'text-primary font-bold' : 'text-text font-semibold'
+                      }`}
+                    >
+                      <span className="text-xs">{option}</span>
+                      <div className={`w-4 h-4 rounded flex items-center justify-center border transition-all shrink-0 ${
+                        isSelected 
+                          ? 'bg-primary border-primary text-white' 
+                          : 'border-gray-300 dark:border-gray-700 bg-white dark:bg-zinc-900'
+                      }`}>
+                        {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="pt-0.5">
+            <input 
+              type="text"
+              value={addOn}
+              onChange={(e) => setAddOn(e.target.value)}
+              placeholder={appLanguage === 'ms' ? 'Pilihan terpilih (boleh taip atau edit secara manual di sini)...' : 'Selected options (type or edit manually here)...'}
+              className="w-full h-[40px] bg-surface rounded-xl px-4 font-bold text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all text-xs placeholder:text-gray-300 placeholder:font-semibold" 
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">Jenis</label>
+          <div className="relative">
+            {(() => {
+              let selectColorClass = "border-gray-100/50";
+              const v = (jenis || '').toLowerCase();
+              if (v.includes('super')) {
+                selectColorClass = "border-super focus:border-super focus:ring-super/20 text-super font-black bg-super/5 dark:bg-super/10 ml-0";
+              } else if (v.includes('semi')) {
+                selectColorClass = "border-semi focus:border-semi focus:ring-semi/20 text-semi font-black bg-semi/5 dark:bg-semi/10 ml-0";
+              } else if (v.includes('urgent')) {
+                selectColorClass = "border-urgent focus:border-urgent focus:ring-urgent/20 text-urgent font-black bg-urgent/5 dark:bg-urgent/10 ml-0";
+              } else if (v.includes('tak') || v.includes('normal') || v.includes('not') || v.includes('tidak')) {
+                selectColorClass = "border-noturgent focus:border-noturgent focus:ring-noturgent/20 text-noturgent font-black bg-noturgent/5 dark:bg-noturgent/10 ml-0";
+              }
+              return (
+                <select 
+                  value={normalizeUrgencyForSheet(jenis)}
+                  onChange={(e) => setJenis(normalizeUrgencyForSheet(e.target.value))}
+                  className={cn(
+                    "w-full h-[46px] bg-surface text-text rounded-xl px-4 font-bold border outline-none focus:ring-2 transition-all appearance-none text-sm",
+                    selectColorClass
+                  )} 
+                >
+                  <option className="text-text font-normal bg-surface" value="Tidak Urgent">{appLanguage === 'ms' ? 'Tidak Urgent' : 'Tidak Urgent (Not Urgent)'}</option>
+                  <option className="text-text font-normal bg-surface" value="Semi Urgent">Semi Urgent</option>
+                  <option className="text-text font-normal bg-surface" value="Urgent">Urgent</option>
+                  <option className="text-text font-normal bg-surface" value="Super Urgent">Super Urgent</option>
+                </select>
+              );
+            })()}
+            <div className="absolute top-0 right-4 h-full flex items-center pointer-events-none">
+              <svg className="w-4 h-4 text-subtext" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">Due</label>
+          <div className="relative">
+            <input 
+              type="text" 
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              placeholder={appLanguage === 'ms' ? 'HH/BB/TTTT (Contoh: 25/12/2024)' : 'DD/MM/YYYY (Example: 25/12/2024)'}
+              className={cn(
+                "w-full h-[46px] bg-surface rounded-xl px-4 font-bold text-text border outline-none focus:ring-2 transition-all text-sm",
+                state.isDueInvalid ? "border-amber-400 bg-amber-50/10 ring-amber-400/10 focus:border-amber-500 placeholder:text-amber-300" : "border-gray-100/50 focus:border-primary/50 focus:ring-primary/10"
+              )} 
+            />
+            {state.isDueInvalid && (
+              <div className="flex items-center mt-1.5 ml-1 text-[10px] font-black text-amber-600 uppercase tracking-tight">
+                <AlertCircle className="w-3.5 h-3.5 mr-1" />
+                {appLanguage === 'ms' ? 'Format Tarikh Tidak Sah / Kosong dari Sheets' : 'Invalid Date Format / Empty from Sheets'}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">{appLanguage === 'ms' ? 'Harga (RM)' : 'Price (RM)'}</label>
+          <input 
+            type="number"
+            step="0.01"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder={appLanguage === 'ms' ? 'Contoh: 50.00' : 'Example: 50.00'}
+            className="w-full h-[46px] bg-surface rounded-xl px-4 font-bold text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all text-sm placeholder:text-gray-300"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-black text-gray-400 ml-1 uppercase tracking-widest">
+            {appLanguage === 'ms' ? 'Link (Asingkan dengan enter/koma untuk lebih 1 link)' : 'Links (Separate multiple links with enter/comma)'}
+          </label>
+          
+          <div className="relative">
+            <textarea 
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              placeholder="https://example1.com&#10;https://example2.com"
+              className="w-full min-h-[68px] py-2 bg-surface rounded-xl px-4 font-bold text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all text-sm sm:text-sm resize-none" 
+            />
+          </div>
+          
+          {/* Display multiple parsed links as clickable pills under the field */}
+          {(() => {
+            const parsedLinks = link.split(/[\n,;\s]+/).map(l => l.trim()).filter(l => l.startsWith('http://') || l.startsWith('https://') || l.includes('.com') || l.includes('docs.google.com') || l.includes('drive.google.com'));
+            if (parsedLinks.length > 0) {
+              return (
+                <div className="mt-1.5 flex flex-wrap gap-1.5 p-1.5 bg-gray-50/50 rounded-xl border border-gray-100/30">
+                  {parsedLinks.map((pLink, idx) => {
+                    let label = `Link ${idx + 1}`;
+                    try {
+                      const url = new URL(pLink.startsWith('http') ? pLink : `https://${pLink}`);
+                      if (url.hostname.includes('docs.google.com')) {
+                        label = `Google Doc ${idx + 1}`;
+                      } else if (url.hostname.includes('drive.google.com')) {
+                        label = `Google Drive ${idx + 1}`;
+                      } else if (url.hostname.includes('canva.com')) {
+                        label = `Canva ${idx + 1}`;
+                      } else {
+                        label = `${url.hostname.replace('www.', '')} [${idx + 1}]`;
+                      }
+                    } catch (e) {
+                      // ignore
+                    }
+                    return (
+                      <a 
+                        key={idx}
+                        href={pLink.startsWith('http') ? pLink : `https://${pLink}`}
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50/70 border border-blue-100/60 hover:bg-blue-100 text-blue-600 rounded-lg text-[11px] font-black tracking-normal transition-colors cursor-pointer select-none"
+                      >
+                        <ExternalLink className="w-3 h-3 text-blue-500" />
+                        <span className="truncate max-w-[140px]">{label}</span>
+                      </a>
+                    );
+                  })}
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between ml-1 mb-1">
+            <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+              {appLanguage === 'ms' ? 'Maklumat Pelanggan' : 'Customer Information'}
+            </label>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={clearAllFields}
+                className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-lg hover:bg-red-100 transition-colors active:scale-95"
+              >
+                {appLanguage === 'ms' ? 'Kosongkan Fields' : 'Clear Fields'}
+              </button>
+              <button
+                type="button"
+                onClick={handleAutoFill}
+                className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg hover:bg-blue-100 transition-colors active:scale-95"
+              >
+                {appLanguage === 'ms' ? 'Auto-isi' : 'Auto-fill'}
+              </button>
+            </div>
+          </div>
+          <textarea 
+            value={info}
+            onChange={(e) => setInfo(e.target.value)}
+            rows={8}
+            placeholder={appLanguage === 'ms' ? 'Salin dan tampal maklumat pelanggan/resume di sini...' : 'Copy and paste customer/resume details here...'}
+            className="w-full bg-surface rounded-xl p-3 font-medium text-text border border-gray-100/50 outline-none focus:border-primary/50 focus:ring-2 ring-primary/10 transition-all placeholder:text-gray-300 text-sm resize-y min-h-[10rem]" 
+          />
+        </div>
+
+        {errorMsg && (
+          <div className="p-3 bg-red-50 text-red-600 rounded-lg text-xs font-medium border border-red-100 whitespace-pre-wrap">
+            {errorMsg}
+          </div>
+        )}
+
+        <div className="pt-2 space-y-2">
+          <button
+            onClick={handleSaveDraft}
+            className="w-full h-[48px] bg-white dark:bg-gray-800 text-blue-600 border-2 border-blue-600/20 font-bold text-sm rounded-2xl flex items-center justify-center space-x-2 active:scale-[0.98] transition-all hover:bg-blue-50 dark:hover:bg-blue-900/10"
+          >
+            <RefreshCcw className="w-4 h-4" />
+            <span>{appLanguage === 'ms' ? 'Simpan Sebagai Draf' : 'Save as Draft'}</span>
+          </button>
+
+          <button
+            onClick={handleSaveInfo}
+            disabled={isSaving}
+            className="w-full h-[58px] bg-blue-600 hover:bg-blue-700 text-white font-black text-base sm:text-base rounded-2xl flex items-center justify-center space-x-2 active:scale-[0.98] transition-all disabled:opacity-70 shadow-md shadow-blue-500/10"
+          >
+            {isSaving ? (
+              <RefreshCcw className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <span>{appLanguage === 'ms' ? 'Hantar Ke Google Sheet' : 'Save To Google Sheet'}</span>
+                <Save className="w-4 h-4 ml-1" />
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+      <Toast show={showToast} message={toastMsg} />
+      {showSetup && <SetupHelper onClose={() => setShowSetup(false)} appLanguage={appLanguage} />}
+    </div>
+  );
+}
