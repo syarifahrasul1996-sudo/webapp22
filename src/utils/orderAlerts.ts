@@ -23,7 +23,7 @@ export function computeOrderAlerts(item: OrderHistoryItem, language: 'ms' | 'en'
   const { customerName, mainType, subType, isDelivered, googleSheetLink, hasNotified, hasDueAlerted } = state;
   const dueTimestamp = getOrderDueTimestamp(item);
 
-  if (dueTimestamp && !isDelivered) {
+  if (dueTimestamp && !isDelivered && !state.isDeleted) {
     // 1. 20-minute alert
     const TWENTY_MINS = 20 * 60 * 1000;
     const twentyMinsTrigger = dueTimestamp - TWENTY_MINS;

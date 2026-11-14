@@ -3,6 +3,7 @@ import { Trash2, Calendar, AlertCircle, RefreshCcw, Save, Check, Search, Databas
 import { getWhatsAppLink, parsePhoneAndUsername } from '../../../utils';
 import type { HistoryController } from '../useHistoryController';
 import { formatCustomerName, formatDisplayPhone } from '../helpers';
+import { safeSetItem } from '../../../lib/safeStorage';
 
 export function RemoteTab({ c }: { c: HistoryController }) {
   const { annualSheets, appLanguage, globalScriptUrl, handleGlobalSync, handleLoadRemoteOrder, handleRemoteDeliveredToggle, handleRemoteSearch, isSearching, remoteResults, searchError, searchQuery, setAlertMsg, setAnnualSheets, setConfirmAction, setGlobalScriptUrl, setRemoteResults, setSearchQuery, setShowDbSettings, showDbSettings, updateOrderHistoryState } = c;
@@ -149,8 +150,8 @@ export function RemoteTab({ c }: { c: HistoryController }) {
               <button
                 type="button"
                 onClick={() => {
-                  localStorage.setItem('db_annual_sheets', JSON.stringify(annualSheets));
-                  localStorage.setItem('db_global_script_url', globalScriptUrl);
+                  safeSetItem('db_annual_sheets', JSON.stringify(annualSheets));
+                  safeSetItem('db_global_script_url', globalScriptUrl);
                   // Save and sync with context state
                   const firstActive = annualSheets.find(s => s.spreadsheetId !== '');
                   if (firstActive) {
@@ -390,7 +391,7 @@ export function RemoteTab({ c }: { c: HistoryController }) {
 
                     {item.syncStatus && (
                       <div className="w-full pt-2 mt-1.5 border-t border-dashed border-gray-100/80 flex items-start justify-between bg-gray-50/50 -mx-3 -mb-3 px-3 py-2 rounded-b-xl">
-                        <div className="text-[9.5px] flex items-center">
+                        <div className="text-[10px] flex items-center">
                           {item.syncStatus === 'syncing' && <span className="text-blue-500 font-semibold animate-pulse flex items-center"><RefreshCcw className="w-2.5 h-2.5 mr-1 animate-spin" /> Syncing…</span>}
                           {item.syncStatus === 'sent_unverified' && (
   <span className="text-amber-600 font-semibold flex items-center">
@@ -410,7 +411,7 @@ export function RemoteTab({ c }: { c: HistoryController }) {
                           )}
                         </div>
                         {(item.syncLastSuccess || item.syncFailCount) && (
-                          <div className="text-[8.5px] text-gray-400 text-right leading-tight">
+                          <div className="text-[10px] text-gray-400 text-right leading-tight">
                             {item.syncLastSuccess && <div>Last sync: <span className="font-medium text-gray-500">{new Date(item.syncLastSuccess).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>}
                             {!!item.syncFailCount && item.syncFailCount > 0 && <div className="text-red-400 font-medium mt-0.5">Failed attempts: {item.syncFailCount}</div>}
                           </div>

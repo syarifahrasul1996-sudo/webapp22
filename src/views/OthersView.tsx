@@ -281,7 +281,7 @@ export function OthersView() {
         <p className="text-[10px] font-bold uppercase tracking-wider">
           {appLanguage === 'ms' ? 'Sistem Tempahan & Pengurusan' : 'Ordering & Management System'}
         </p>
-        <p className="text-[9px] font-semibold opacity-80">v1.2.0 (Offline-Enabled App)</p>
+        <p className="text-[10px] font-semibold opacity-80">v1.2.0 (Offline-Enabled App)</p>
       </div>
     </div>
   );

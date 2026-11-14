@@ -5,6 +5,7 @@ import { DEFAULT_SCRIPT_URL, withScriptKey } from '../../config';
 import { parseDueTimestamp } from './helpers';
 import { useHistoryState } from './useHistoryState';
 import { useHistoryDerived } from './useHistoryDerived';
+import { safeSetItem } from '../../lib/safeStorage';
 
 export function useCloudSync(deps: ReturnType<typeof useHistoryState> & ReturnType<typeof useHistoryDerived>) {
   const { addToOfflineQueue, annualSheets, appLanguage, deletedOrderIdsRef, globalScriptUrl, setAlertMsg, setConfirmAction, setHistory, setPullProgress, setRefreshing, setSyncErrorToast, setSyncingId, state, syncOfflineQueue, updateSpecificHistoryItem } = deps;
@@ -489,7 +490,7 @@ export function useCloudSync(deps: ReturnType<typeof useHistoryState> & ReturnTy
         return deduplicateHistoryList(updatedHistory);
       });
 
-      localStorage.setItem('db_last_sync_time', String(currentNow));
+      safeSetItem('db_last_sync_time', String(currentNow));
       console.log(`[Sync Debug] Manual sync finished at ${new Date(currentNow).toISOString()}`, {
         successfulSheets: results.filter(r => r.success).length,
         failedSheets: results.filter(r => !r.success).length,

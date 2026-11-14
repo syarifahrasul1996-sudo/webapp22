@@ -84,12 +84,12 @@ export function TrashTab({ c }: { c: HistoryController }) {
                           <div className="flex items-center space-x-2">
                             <span className="text-xs font-black text-text">{formatCustomerName(customerName)}</span>
                             {item.state?.customerJenis && (
-                              <span className="px-1.5 py-0.5 text-[8px] bg-gray-100 text-subtext font-bold rounded-md">
+                              <span className="px-1.5 py-0.5 text-[10px] bg-gray-100 text-subtext font-bold rounded-md">
                                 {item.state.customerJenis}
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center text-[9px] text-subtext space-x-2 font-semibold">
+                          <div className="flex items-center text-[10px] text-subtext space-x-2 font-semibold">
                             <span>ID: {orderIdHex.substring(0, 10)}</span>
                             <span>•</span>
                             <span>{dateStr}</span>

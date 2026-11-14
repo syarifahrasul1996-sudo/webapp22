@@ -447,7 +447,7 @@ export function LocalTab({ c }: { c: HistoryController }) {
                               : 'Not Delivered'}
                           </button>
 
-                          <div className="text-[9.5px] text-right text-subtext font-medium leading-none select-none">
+                          <div className="text-[10px] text-right text-subtext font-medium leading-none select-none">
                             <span className="opacity-75">{appLanguage === 'ms' ? 'Disunting: ' : 'Edited: '}</span>
                             <span className="font-semibold text-text/80">{formattedLastEditedDate}</span>
                           </div>
@@ -455,7 +455,7 @@ export function LocalTab({ c }: { c: HistoryController }) {
 
                         {item.state.syncStatus && (
                           <div className="w-full pt-2 mt-1.5 border-t border-dashed border-gray-100/80 flex items-start justify-between bg-gray-50/50 -mx-3 -mb-3 px-3 py-2 rounded-b-xl">
-                            <div className="text-[9.5px] flex items-center">
+                            <div className="text-[10px] flex items-center">
                               {item.state.syncStatus === 'saved_locally' && <span className="text-gray-500 font-medium">Saved locally</span>}
                               {item.state.syncStatus === 'syncing' && <span className="text-blue-500 font-semibold animate-pulse flex items-center"><RefreshCcw className="w-2.5 h-2.5 mr-1 animate-spin" /> Syncing…</span>}
                               {item.state.syncStatus === 'sent_unverified' && (
@@ -476,7 +476,7 @@ export function LocalTab({ c }: { c: HistoryController }) {
                               )}
                             </div>
                             {(item.state.syncLastSuccess || item.state.syncFailCount) && (
-                              <div className="text-[8.5px] text-gray-400 text-right leading-tight">
+                              <div className="text-[10px] text-gray-400 text-right leading-tight">
                                 {item.state.syncLastSuccess && <div>Last sync: <span className="font-medium text-gray-500">{new Date(item.state.syncLastSuccess).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>}
                                 {!!item.state.syncFailCount && item.state.syncFailCount > 0 && <div className="text-red-400 font-medium mt-0.5">Failed attempts: {item.state.syncFailCount}</div>}
                               </div>

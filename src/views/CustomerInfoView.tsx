@@ -7,6 +7,7 @@ import { Toast } from '../components/Toast';
 import { SetupHelper } from '../components/SetupHelper';
 import { cn } from '../cn';
 import { DEFAULT_SCRIPT_URL, DEFAULT_SPREADSHEET_ID, withScriptKey } from '../config';
+import { safeSetItem, safeRemoveItem } from '../lib/safeStorage';
 
 function generateOrderId() {
   const now = new Date();
@@ -338,7 +339,7 @@ export function CustomerInfoView() {
   };
 
   const handleDismissProgress = () => {
-    localStorage.removeItem('customer_form_progress');
+    safeRemoveItem('customer_form_progress');
     setShowResumeBanner(false);
   };
 
@@ -406,7 +407,7 @@ export function CustomerInfoView() {
           price,
           savedAt: Date.now()
         };
-        localStorage.setItem('customer_form_progress', JSON.stringify(data));
+        safeSetItem('customer_form_progress', JSON.stringify(data));
       }, 1000); // 1s debounce to align updates nicely
       return () => clearTimeout(timer);
     }

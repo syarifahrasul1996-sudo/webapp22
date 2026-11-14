@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../firebase-applet-config.json';
+import { safeSetItem, safeRemoveItem } from './lib/safeStorage';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -17,8 +18,8 @@ const getStoredToken = () => {
   if (token && expiry && Date.now() < parseInt(expiry, 10)) {
     return token;
   }
-  localStorage.removeItem('google_access_token');
-  localStorage.removeItem('google_access_token_expiry');
+  safeRemoveItem('google_access_token');
+  safeRemoveItem('google_access_token_expiry');
   return null;
 }
 
@@ -38,8 +39,8 @@ export const initAuth = (
       }
     } else {
       cachedAccessToken = null;
-      localStorage.removeItem('google_access_token');
-      localStorage.removeItem('google_access_token_expiry');
+      safeRemoveItem('google_access_token');
+      safeRemoveItem('google_access_token_expiry');
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -56,8 +57,8 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
-    localStorage.setItem('google_access_token', cachedAccessToken);
-    localStorage.setItem('google_access_token_expiry', (Date.now() + 3500 * 1000).toString());
+    safeSetItem('google_access_token', cachedAccessToken);
+    safeSetItem('google_access_token_expiry', (Date.now() + 3500 * 1000).toString());
 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
@@ -85,8 +86,8 @@ export const handleRedirectResult = async (): Promise<{ user: User; accessToken:
     }
 
     cachedAccessToken = credential.accessToken;
-    localStorage.setItem('google_access_token', cachedAccessToken);
-    localStorage.setItem('google_access_token_expiry', (Date.now() + 3500 * 1000).toString());
+    safeSetItem('google_access_token', cachedAccessToken);
+    safeSetItem('google_access_token_expiry', (Date.now() + 3500 * 1000).toString());
 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
@@ -102,6 +103,6 @@ export const getAccessToken = async (): Promise<string | null> => {
 export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
-  localStorage.removeItem('google_access_token');
-  localStorage.removeItem('google_access_token_expiry');
+  safeRemoveItem('google_access_token');
+  safeRemoveItem('google_access_token_expiry');
 };

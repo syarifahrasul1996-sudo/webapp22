@@ -60,7 +60,7 @@ export function HistoryTabs({ c }: { c: HistoryController }) {
             {(() => {
               const deletedCount = history.filter(item => item?.state?.isDeleted).length;
               return deletedCount > 0 ? (
-                <span className="px-1.5 py-0.5 text-[9px] font-black bg-rose-600 dark:bg-rose-500 text-white rounded-full scale-90 select-none animate-pulse">
+                <span className="px-1.5 py-0.5 text-[10px] font-black bg-rose-600 dark:bg-rose-500 text-white rounded-full scale-90 select-none animate-pulse">
                   {deletedCount}
                 </span>
               ) : null;

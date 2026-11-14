@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import type { OrderHistoryItem, AppState } from '../types';
 import { parseDateStringToTimestamp, normalizeNameStr, normalizePhoneDigits, parseMainType, deduplicateHistoryList, extractPendapatanValue, smartFetchGoogleScript } from '../utils';
+import { safeSetItem } from '../lib/safeStorage';
 
 export const BACKGROUND_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -334,7 +335,7 @@ export async function silentBackgroundSync(
     });
 
     const now = Date.now();
-    localStorage.setItem('db_last_sync_time', String(now));
+    safeSetItem('db_last_sync_time', String(now));
 
     console.log(`[Sync Debug] Background sync completed at ${new Date(now).toISOString()}`, {
       totalDurationMs: now - syncStartTime,

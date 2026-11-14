@@ -192,7 +192,7 @@ console.log(
         >
           <div className="flex items-center gap-1">
             <Hourglass className="w-3 h-3 text-primary shrink-0" />
-            <span className="text-[9px] font-black uppercase tracking-wider text-primary truncate">
+            <span className="text-[10px] font-black uppercase tracking-wider text-primary truncate">
               {appLanguage === 'ms' ? 'Belum Siap' : 'Pending'}
             </span>
           </div>
@@ -200,7 +200,7 @@ console.log(
             <span className="font-mono font-black text-2xl text-primary block leading-none">
               {totalPendingCount}
             </span>
-            <span className="text-[8px] text-subtext/70 font-semibold block mt-0.5 leading-none">
+            <span className="text-[10px] text-subtext/70 font-semibold block mt-0.5 leading-none">
               {appLanguage === 'ms' ? 'aktif' : 'active'}
             </span>
           </div>
@@ -217,7 +217,7 @@ console.log(
         >
           <div className="flex items-center gap-1">
             <AlertCircle className="w-3 h-3 text-rose-500 shrink-0" />
-            <span className="text-[9px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400 truncate">
+            <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400 truncate">
               {appLanguage === 'ms' ? 'Hari Ini' : 'Today'}
             </span>
           </div>
@@ -225,7 +225,7 @@ console.log(
             <span className="font-mono font-black text-2xl text-rose-600 dark:text-rose-400 block leading-none">
               {todayPendingCount}
             </span>
-            <span className="text-[8px] text-subtext/70 font-semibold block mt-0.5 leading-none">
+            <span className="text-[10px] text-subtext/70 font-semibold block mt-0.5 leading-none">
               {appLanguage === 'ms' ? 'tempahan' : 'orders'}
             </span>
           </div>
@@ -242,7 +242,7 @@ console.log(
         >
           <div className="flex items-center gap-1">
             <Calendar className="w-3 h-3 text-amber-500 shrink-0" />
-            <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 truncate">
+            <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 truncate">
               {appLanguage === 'ms' ? 'Esok' : 'Tomorrow'}
             </span>
           </div>
@@ -250,7 +250,7 @@ console.log(
             <span className="font-mono font-black text-2xl text-amber-600 dark:text-amber-400 block leading-none">
               {tomorrowPendingCount}
             </span>
-            <span className="text-[8px] text-subtext/70 font-semibold block mt-0.5 leading-none">
+            <span className="text-[10px] text-subtext/70 font-semibold block mt-0.5 leading-none">
               {appLanguage === 'ms' ? 'tempahan' : 'orders'}
             </span>
           </div>
@@ -298,7 +298,7 @@ console.log(
                 key={opt.id}
                 onClick={() => setCalcUrgency(prev => prev === opt.id ? 'all' : opt.id)}
                 className={cn(
-                  "py-2 px-0.5 rounded-lg font-black text-[9px] min-[360px]:text-[10px] sm:text-xs leading-tight transition-all cursor-pointer text-center flex items-center justify-center min-h-[36px]",
+                  "py-2 px-0.5 rounded-lg font-black text-[10px] min-[360px]:text-[10px] sm:text-xs leading-tight transition-all cursor-pointer text-center flex items-center justify-center min-h-[36px]",
                   isSelected 
                     ? activeBg 
                     : "text-subtext hover:bg-white/40 dark:hover:bg-zinc-800/40"
@@ -324,7 +324,7 @@ console.log(
             </button>
             <div className="flex items-center gap-1">
                <span className="font-black text-base text-primary">{superHours}</span>
-               <span className="text-[9px] font-black tracking-widest uppercase text-subtext">{appLanguage === 'ms' ? 'Jam' : 'Hours'}</span>
+               <span className="text-[10px] font-black tracking-widest uppercase text-subtext">{appLanguage === 'ms' ? 'Jam' : 'Hours'}</span>
             </div>
             <button 
               onClick={() => setSuperHours(h => h + 1)}
@@ -337,7 +337,7 @@ console.log(
 
         {/* Output Area */}
         <div className="relative">
-          <span className="absolute top-2 left-2.5 text-[8px] font-black uppercase tracking-widest text-subtext/75 flex items-center">
+          <span className="absolute top-2 left-2.5 text-[10px] font-black uppercase tracking-widest text-subtext/75 flex items-center">
             <Clock className="w-3 h-3 mr-1 text-primary" />
             {appLanguage === 'ms' ? 'Format Anggaran Siap' : 'Formatted Ready Times'}
           </span>

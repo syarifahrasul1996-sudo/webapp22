@@ -64,3 +64,14 @@ after the first load, but the home-screen install icon and push-notification ico
 on imgur. Save the logo as `public/icons/icon-192.png` and `icon-512.png`, then replace
 `https://i.imgur.com/49kNDoe.png` with `/icons/icon-192.png` in `index.html`, `public/manifest.json`,
 `src/components/Header.tsx` and `DesktopSidebar.tsx`.
+
+## Storage safety
+
+All `localStorage` writes go through `src/lib/safeStorage.ts`, which never throws. If the browser
+refuses a write (storage full or blocked), the app keeps working and shows a dismissible warning
+(`StorageWarning`). Use `safeSetItem` / `safeRemoveItem` for any new persisted state.
+
+## Tests
+
+`npm test` runs unit tests (Vitest, pinned to Malaysia time) for the delivery-date parsing, the
+active-order window and the reminder timing (`src/utils/*.test.ts`). `npm run lint` type-checks.

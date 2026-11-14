@@ -34,6 +34,7 @@ import {
   FCMStatus 
 } from '../lib/fcm';
 import { cn } from '../cn';
+import { safeSetItem } from '../lib/safeStorage';
 
 interface NotificationItem {
   id: string;
@@ -86,7 +87,7 @@ export function NotificationsDropdown() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('app_read_notifications', JSON.stringify(readIds));
+      safeSetItem('app_read_notifications', JSON.stringify(readIds));
     } catch (e) {
       console.warn(e);
     }
@@ -464,7 +465,7 @@ export function NotificationsDropdown() {
                             <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
                               {appLanguage === 'ms' ? 'Peranti iPhone / iPad' : 'iPhone / iPad Device'}
                             </span>
-                            <span className="text-[9px] font-semibold bg-amber-200/60 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded">
+                            <span className="text-[10px] font-semibold bg-amber-200/60 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded">
                               iOS 16.4+
                             </span>
                           </div>
@@ -624,14 +625,14 @@ export function NotificationsDropdown() {
                   )}
 
                   {/* Subtle, collapsible technical info tucked away */}
-                  <details className="text-[9px] text-subtext pt-0.5 opacity-70 hover:opacity-100 transition-opacity">
+                  <details className="text-[10px] text-subtext pt-0.5 opacity-70 hover:opacity-100 transition-opacity">
                     <summary className="cursor-pointer hover:underline font-semibold flex items-center justify-between">
                       <span>{appLanguage === 'ms' ? 'Maklumat Teknikal Peranti (FID)' : 'Technical Device Info (FID)'}</span>
-                      <span className="font-mono text-[8px]">{registeredFid.substring(0, 8)}...</span>
+                      <span className="font-mono text-[10px]">{registeredFid.substring(0, 8)}...</span>
                     </summary>
                     <div className="mt-1.5 p-2 bg-white dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800 space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-[8px] text-subtext select-all break-all">{registeredFid}</span>
+                        <span className="font-mono text-[10px] text-subtext select-all break-all">{registeredFid}</span>
                         <button
                           type="button"
                           onClick={handleCopyFid}
@@ -661,7 +662,7 @@ export function NotificationsDropdown() {
                   <p>
                     <strong className="text-text">3. {appLanguage === 'ms' ? 'Tetapan Sistem Peranti:' : 'Device System Settings:'}</strong> {appLanguage === 'ms' ? 'Pastikan kebenaran notifikasi pelayar dibenarkan dalam Settings Windows/Mac/Android/iOS anda.' : 'Ensure browser/app notifications are enabled in your OS system settings.'}
                   </p>
-                  <p className="text-[9px] opacity-80 italic">
+                  <p className="text-[10px] opacity-80 italic">
                     {appLanguage === 'ms' ? '⚡ Pelayan automatik menyemak tarikh akhir pesanan setiap 30 saat dan menghantar notifikasi push latar belakang terus ke peranti anda.' : '⚡ The server checks order deadlines every 30 seconds and delivers push notifications in the background to your device.'}
                   </p>
                 </div>

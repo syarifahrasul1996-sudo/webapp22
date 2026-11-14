@@ -5,6 +5,7 @@ import { useBackgroundSync } from './utils/backgroundSync';
 import { deduplicateHistoryList, smartFetchGoogleScript, normalizeUrgencyForSheet } from './utils';
 import { getOrderDueTimestamp } from './utils/orderWindow';
 import { DEFAULT_SCRIPT_URL, DEFAULT_SPREADSHEET_ID, withScriptKey } from './config';
+import { safeSetItem, safeRemoveItem } from './lib/safeStorage';
 
 
 interface AppContextType {
@@ -143,7 +144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    localStorage.setItem('deletedOrderIds', JSON.stringify(deletedOrderIds));
+    safeSetItem('deletedOrderIds', JSON.stringify(deletedOrderIds));
   }, [deletedOrderIds]);
 
   const [drafts, setDrafts] = useState<OrderHistoryItem[]>(() => {
@@ -160,27 +161,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    localStorage.setItem('appState', JSON.stringify(state));
+    safeSetItem('appState', JSON.stringify(state));
   }, [state]);
 
   useEffect(() => {
-    localStorage.setItem('viewStack', JSON.stringify(viewStack));
+    safeSetItem('viewStack', JSON.stringify(viewStack));
   }, [viewStack]);
 
   useEffect(() => {
-    localStorage.setItem('generatedMessages', JSON.stringify(generatedMessages));
+    safeSetItem('generatedMessages', JSON.stringify(generatedMessages));
   }, [generatedMessages]);
 
   useEffect(() => {
-    localStorage.setItem('orderHistory', JSON.stringify(history));
+    safeSetItem('orderHistory', JSON.stringify(history));
   }, [history]);
 
   useEffect(() => {
-    localStorage.setItem('orderDrafts', JSON.stringify(drafts));
+    safeSetItem('orderDrafts', JSON.stringify(drafts));
   }, [drafts]);
 
   useEffect(() => {
-    localStorage.setItem('appTheme', theme);
+    safeSetItem('appTheme', theme);
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
       document.body.classList.add('dark-theme-active');
@@ -191,7 +192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem('appLanguage', appLanguage);
+    safeSetItem('appLanguage', appLanguage);
   }, [appLanguage]);
 
   useEffect(() => {
@@ -522,7 +523,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: orderId,
         timestamp: Date.now()
       });
-      localStorage.setItem('db_offline_sync_queue', JSON.stringify(queue));
+      safeSetItem('db_offline_sync_queue', JSON.stringify(queue));
       updateQueueSize();
     } catch (e) {
       console.warn('Failed to add to offline queue', e);
@@ -546,7 +547,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       queue = JSON.parse(queueStr);
     } catch (e) {
-      localStorage.removeItem('db_offline_sync_queue');
+      safeRemoveItem('db_offline_sync_queue');
       updateQueueSize();
       return;
     }
@@ -578,9 +579,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         processedCount++;
         
         if (remainingQueue.length === 0) {
-          localStorage.removeItem('db_offline_sync_queue');
+          safeRemoveItem('db_offline_sync_queue');
         } else {
-          localStorage.setItem('db_offline_sync_queue', JSON.stringify(remainingQueue));
+          safeSetItem('db_offline_sync_queue', JSON.stringify(remainingQueue));
         }
         updateQueueSize();
       } catch (e) {
@@ -594,7 +595,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (processedCount > 0) {
       const now = Date.now();
       setLastSyncTime(now);
-      localStorage.setItem('db_last_sync_time', String(now));
+      safeSetItem('db_last_sync_time', String(now));
     }
   };
 
@@ -857,7 +858,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const clearHistory = () => {
     setHistory([]);
-    localStorage.removeItem('orderHistory');
+    safeRemoveItem('orderHistory');
   };
 
   const loadOrder = (item: OrderHistoryItem) => {
@@ -918,7 +919,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const resetOrderForm = () => {
     try {
-      localStorage.removeItem('customer_form_progress');
+      safeRemoveItem('customer_form_progress');
     } catch (e) {
       // ignore
     }
@@ -949,10 +950,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(INITIAL_STATE);
     setViewStack(['home']);
     setGeneratedMessages([]);
-    localStorage.removeItem('appState');
-    localStorage.removeItem('viewStack');
-    localStorage.removeItem('generatedMessages');
-    localStorage.removeItem('customer_form_progress');
+    safeRemoveItem('appState');
+    safeRemoveItem('viewStack');
+    safeRemoveItem('generatedMessages');
+    safeRemoveItem('customer_form_progress');
   };
 
   // Background synchronization utility checking for new order updates every 5 minutes when active

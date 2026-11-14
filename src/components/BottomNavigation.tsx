@@ -39,7 +39,7 @@ export function BottomNavigation() {
           id="btn-nav-home"
         >
           <Home className={cn("w-5 h-5", currentView === 'home' ? "stroke-[2.5]" : "stroke-[2]")} />
-          <span className="text-[9px] uppercase tracking-wider mt-1">
+          <span className="text-[10px] uppercase tracking-wider mt-1">
             {appLanguage === 'ms' ? 'Laman' : 'Home'}
           </span>
         </button>
@@ -54,7 +54,7 @@ export function BottomNavigation() {
           id="btn-nav-orders"
         >
           <History className={cn("w-5 h-5", currentView === 'history' ? "stroke-[2.5]" : "stroke-[2]")} />
-          <span className="text-[9px] uppercase tracking-wider mt-1">
+          <span className="text-[10px] uppercase tracking-wider mt-1">
             {appLanguage === 'ms' ? 'Tempahan' : 'Orders'}
           </span>
         </button>
@@ -82,7 +82,7 @@ export function BottomNavigation() {
           id="btn-nav-analytics"
         >
           <BarChart3 className={cn("w-5 h-5", currentView === 'dashboard' ? "stroke-[2.5]" : "stroke-[2]")} />
-          <span className="text-[9px] uppercase tracking-wider mt-1">
+          <span className="text-[10px] uppercase tracking-wider mt-1">
             {appLanguage === 'ms' ? 'Analisis' : 'Analytics'}
           </span>
         </button>
@@ -97,7 +97,7 @@ export function BottomNavigation() {
           id="btn-nav-others"
         >
           <MoreHorizontal className={cn("w-5 h-5", currentView === 'others' ? "stroke-[2.5]" : "stroke-[2]")} />
-          <span className="text-[9px] uppercase tracking-wider mt-1">
+          <span className="text-[10px] uppercase tracking-wider mt-1">
             {appLanguage === 'ms' ? 'Lain-lain' : 'Others'}
           </span>
         </button>

@@ -1,5 +1,6 @@
 import React, { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCcw } from 'lucide-react';
+import { safeRemoveItem } from '../lib/safeStorage';
 
 interface Props {
   children: ReactNode;
@@ -32,7 +33,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   private handleReset = () => {
     try {
-      localStorage.removeItem('viewStack');
+      safeRemoveItem('viewStack');
     } catch {}
     window.location.reload();
   };

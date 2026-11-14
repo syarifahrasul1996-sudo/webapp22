@@ -10,6 +10,7 @@ import {
   MessagePayload 
 } from 'firebase/messaging';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { safeSetItem, safeRemoveItem } from './safeStorage';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
@@ -230,8 +231,8 @@ export async function getFCMStatus(): Promise<FCMStatus> {
     currentRegisteredFid = null;
     currentRegistrationSecret = null;
     try {
-      localStorage.removeItem('fcm_registered_fid');
-      localStorage.removeItem('fcm_registration_secret');
+      safeRemoveItem('fcm_registered_fid');
+      safeRemoveItem('fcm_registration_secret');
     } catch (e) {
       console.warn(e);
     }
@@ -383,8 +384,8 @@ function attachSharedFCMListeners(
       currentRegistrationSecret = null;
       if (typeof window !== 'undefined') {
         try {
-          localStorage.removeItem('fcm_registered_fid');
-          localStorage.removeItem('fcm_registration_secret');
+          safeRemoveItem('fcm_registered_fid');
+          safeRemoveItem('fcm_registration_secret');
         } catch (e) {}
       }
     }
@@ -402,13 +403,13 @@ function attachSharedFCMListeners(
     if (syncResult.success) {
       currentRegisteredFid = fid;
       try {
-        localStorage.setItem('fcm_registered_fid', fid);
+        safeSetItem('fcm_registered_fid', fid);
       } catch (e) {}
 
       if (syncResult.secret) {
         currentRegistrationSecret = syncResult.secret;
         try {
-          localStorage.setItem('fcm_registration_secret', syncResult.secret);
+          safeSetItem('fcm_registration_secret', syncResult.secret);
         } catch (e) {}
       }
 
@@ -573,8 +574,8 @@ export async function initFCMStartupReconciliation(onPayloadReceived?: (payload:
         currentRegisteredFid = null;
         currentRegistrationSecret = null;
         try {
-          localStorage.removeItem('fcm_registered_fid');
-          localStorage.removeItem('fcm_registration_secret');
+          safeRemoveItem('fcm_registered_fid');
+          safeRemoveItem('fcm_registration_secret');
         } catch (e) {}
       }
       return () => {};

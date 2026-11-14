@@ -5,6 +5,7 @@ import { ViewSection } from './components/ViewSection';
 import { Toast } from './components/Toast';
 import { FloatingControls } from './components/FloatingControls';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { StorageWarning } from './components/StorageWarning';
 
 import { HomeView } from './views/HomeView';
 import { ResumeTypeView } from './views/ResumeTypeView';
@@ -52,6 +53,7 @@ function AppContent() {
         </div>
 
         <div className="flex-1 flex flex-col h-full overflow-hidden relative w-full bg-gray-50/50 dark:bg-black/20">
+          <StorageWarning />
           <Header />
           
           <main className="flex-1 overflow-y-auto overflow-x-hidden relative flex justify-center">

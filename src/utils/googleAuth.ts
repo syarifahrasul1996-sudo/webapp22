@@ -1,6 +1,7 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { safeSetItem, safeRemoveItem } from '../lib/safeStorage';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
@@ -18,8 +19,8 @@ const getStoredToken = () => {
     if (token && expiry && Date.now() < parseInt(expiry, 10)) {
       return token;
     }
-    localStorage.removeItem('google_docs_access_token');
-    localStorage.removeItem('google_docs_access_token_expiry');
+    safeRemoveItem('google_docs_access_token');
+    safeRemoveItem('google_docs_access_token_expiry');
   } catch (e) {
     console.warn('LocalStorage error:', e);
   }
@@ -43,8 +44,8 @@ export const initAuth = (
     } else {
       cachedAccessToken = null;
       try {
-        localStorage.removeItem('google_docs_access_token');
-        localStorage.removeItem('google_docs_access_token_expiry');
+        safeRemoveItem('google_docs_access_token');
+        safeRemoveItem('google_docs_access_token_expiry');
       } catch (e) {}
       if (onAuthFailure) onAuthFailure();
     }
@@ -62,9 +63,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 
     cachedAccessToken = credential.accessToken;
     try {
-      localStorage.setItem('google_docs_access_token', cachedAccessToken);
+      safeSetItem('google_docs_access_token', cachedAccessToken);
       // Google access tokens expire in 1 hour (3600 seconds). We save it with a 55 minutes margin (3300 seconds).
-      localStorage.setItem('google_docs_access_token_expiry', (Date.now() + 3300 * 1000).toString());
+      safeSetItem('google_docs_access_token_expiry', (Date.now() + 3300 * 1000).toString());
     } catch (e) {
       console.warn('LocalStorage save error:', e);
     }
@@ -86,7 +87,7 @@ export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
   try {
-    localStorage.removeItem('google_docs_access_token');
-    localStorage.removeItem('google_docs_access_token_expiry');
+    safeRemoveItem('google_docs_access_token');
+    safeRemoveItem('google_docs_access_token_expiry');
   } catch (e) {}
 };
